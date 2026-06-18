@@ -153,6 +153,12 @@ def test_llm():
     return llm.test_provider()
 
 
+@app.get("/api/config/ollama-models")
+def ollama_models():
+    """List the models installed on the configured Ollama host (for the UI picker)."""
+    return llm.list_ollama_models()
+
+
 # --- frontend ---------------------------------------------------------------
 @app.get("/")
 def index():

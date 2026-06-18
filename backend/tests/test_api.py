@@ -32,6 +32,17 @@ def test_report_mock():
     body = r.json()
     assert body["provider"] == "mock"
     assert body["markdown"]
+    # the response always reports which model was used (None for mock)
+    assert "model" in body
+
+
+def test_ollama_models_endpoint():
+    # no Ollama running in CI: endpoint must still respond cleanly (ok=False)
+    r = client.get("/api/config/ollama-models")
+    assert r.status_code == 200
+    body = r.json()
+    assert "models" in body and isinstance(body["models"], list)
+    assert "ok" in body
 
 
 def test_config_get_masks_secrets():

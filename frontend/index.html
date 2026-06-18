@@ -283,6 +283,13 @@
   .testrow { display: flex; align-items: center; gap: 14px; padding: 14px 0 4px; }
   .test-result { font-size: 12.5px; }
   .test-result.ok { color: var(--ok); } .test-result.err { color: var(--crit); }
+  .ollama-load { display: flex; align-items: center; gap: 10px; margin-top: 9px; }
+  .btn.small { height: 30px; padding: 5px 10px; font-size: 12px; }
+  .fallback-note { background: rgba(206,146,72,0.10); border: 1px solid rgba(206,146,72,0.4);
+    color: var(--warn); border-radius: 9px; padding: 10px 13px; margin: 4px 0 14px; font-size: 12.5px; }
+  .fallback-note b { color: var(--text); }
+  .fallback-note .fn-err { display: block; margin-top: 5px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace; font-size: 11.5px; }
   .rangefield { padding: 11px 0; }
   .rangefield .rtop { display: flex; justify-content: space-between; align-items: baseline; }
   .rangefield .rname { font-size: 13px; color: var(--text); }
@@ -443,9 +450,17 @@
           </div>
           <div class="prov prov-ollama">
             <div class="field"><label for="cf_ollama_host">Host Ollama</label>
-              <input type="text" id="cf_ollama_host" placeholder="http://localhost:11434"></div>
+              <input type="text" id="cf_ollama_host" placeholder="http://host.docker.internal:11434"></div>
             <div class="field"><label for="cf_ollama_model">Modello Ollama</label>
-              <input type="text" id="cf_ollama_model" placeholder="llama3.1"></div>
+              <div>
+                <input type="text" id="cf_ollama_model" list="cf_ollama_models" placeholder="es. llama3.1, gemma3 …">
+                <datalist id="cf_ollama_models"></datalist>
+                <div class="ollama-load">
+                  <button type="button" class="btn small" id="cf_loadmodels">Carica modelli installati</button>
+                  <span class="hint" id="cf_modelshint"></span>
+                </div>
+              </div>
+            </div>
           </div>
 
           <div class="testrow">
@@ -751,9 +766,19 @@
     try {
       const res = await loadReport(state.ns);
       lastReportMd = res.markdown || "";
-      $("#provtag").textContent = (res.fallback ? "fallback · " : "") + (res.provider || "");
-      $("#reportmd").innerHTML = renderMarkdown(lastReportMd);
-      if (res.error && !res.fallback) $("#reportmd").innerHTML = "<div class='state err'>" + res.error + "</div>";
+      const modelLbl = res.model ? " · " + res.model : "";
+      $("#provtag").textContent = (res.fallback ? "⚠ fallback · " : "") + (res.provider || "—") + modelLbl;
+      if (res.error && !res.fallback && !lastReportMd) {
+        $("#reportmd").innerHTML = "<div class='state err'>" + res.error + "</div>";
+      } else {
+        let banner = "";
+        if (res.fallback) {
+          banner = "<div class='fallback-note'>⚠ Il modello <b>" + (res.provider || "") +
+            (res.model ? " · " + res.model : "") + "</b> non ha risposto: report generato localmente con <b>mock</b>." +
+            (res.error ? " <span class='fn-err'>" + res.error + "</span>" : "") + "</div>";
+        }
+        $("#reportmd").innerHTML = banner + renderMarkdown(lastReportMd);
+      }
     } catch (e) {
       $("#reportmd").innerHTML = "<div class='state err'>Errore generazione report: " + e.message + "</div>";
     } finally { btn.disabled = false; btn.innerHTML = orig; }
@@ -943,6 +968,26 @@
     finally { btn.disabled = false; btn.textContent = orig; }
   }
 
+  async function loadOllamaModels() {
+    if (!cfgAvailable) return;
+    const btn = $("#cf_loadmodels"), orig = btn.textContent, hint = $("#cf_modelshint");
+    btn.disabled = true; btn.textContent = "…"; hint.textContent = "caricamento…";
+    try {
+      await putConfig(collectConfig());            // applica l'host corrente, poi interroga
+      const res = await api("/api/config/ollama-models");
+      const dl = $("#cf_ollama_models"); dl.innerHTML = "";
+      (res.models || []).forEach((m) => { const o = el("option"); o.value = m; dl.appendChild(o); });
+      if (res.ok) {
+        hint.textContent = res.models.length
+          ? res.models.length + " modelli su " + res.host + " — scegline uno dal campo"
+          : "nessun modello installato su " + res.host;
+      } else {
+        hint.textContent = "✗ " + (res.error || "host non raggiungibile");
+      }
+    } catch (e) { hint.textContent = "✗ " + e.message; }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  }
+
   async function resetSettings() {
     if (!cfgAvailable) return;
     if (!confirm("Ripristinare la configurazione ai valori di default (variabili d'ambiente)?")) return;
@@ -1022,6 +1067,7 @@
   $("#cf_llm_provider").addEventListener("change", applyProvVisibility);
   $("#cf_save").onclick = saveSettings;
   $("#cf_testllm").onclick = testLlm;
+  $("#cf_loadmodels").onclick = loadOllamaModels;
   $("#cf_reset").onclick = resetSettings;
 
   document.addEventListener("keydown", (e) => {

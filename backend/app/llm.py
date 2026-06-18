@@ -216,22 +216,34 @@ _PROVIDERS = {
 }
 
 
+def _model_for(provider: str) -> str | None:
+    """The model name a provider would use (None for the dependency-free mock)."""
+    return {
+        "anthropic": settings.anthropic_model,
+        "openai": settings.openai_model,
+        "ollama": settings.ollama_model,
+    }.get(provider)
+
+
 def generate_report(analysis: NamespaceAnalysis) -> dict:
     provider = settings.llm_provider
+    model = _model_for(provider)
     fn = _PROVIDERS.get(provider)
     if fn is None:
-        return {"provider": provider, "error": f"Provider sconosciuto: {provider}", "markdown": ""}
+        # unknown provider: still return a useful mock report
+        return {"provider": provider, "model": model, "markdown": _report_mock(analysis),
+                "error": f"Provider sconosciuto: {provider}", "fallback": True}
     try:
         markdown = fn(analysis)
-        return {"provider": provider, "markdown": markdown}
+        return {"provider": provider, "model": model, "markdown": markdown}
     except Exception as exc:  # noqa: BLE001
         log.exception("Report generation failed with provider %s", provider)
         # graceful fallback so the UI always shows something useful
-        fallback = _report_mock(analysis)
         return {
             "provider": provider,
+            "model": model,
             "error": f"{type(exc).__name__}: {exc}",
-            "markdown": fallback,
+            "markdown": _report_mock(analysis),
             "fallback": True,
         }
 
@@ -276,18 +288,40 @@ def test_provider() -> dict:
                     "detail": "Connessione a OpenAI riuscita."}
 
         if provider == "ollama":
-            url = f"{settings.ollama_host.rstrip('/')}/api/tags"
-            r = httpx.get(url, timeout=10.0)
-            r.raise_for_status()
-            models = [m.get("name", "") for m in r.json().get("models", [])]
+            host = settings.ollama_host.rstrip("/")
             target = settings.ollama_model
-            has_model = any(target in m for m in models)
-            detail = f"Ollama raggiungibile ({len(models)} modelli installati)."
+            try:
+                r = httpx.get(f"{host}/api/tags", timeout=10.0)
+                r.raise_for_status()
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout) as exc:
+                return {
+                    "ok": False, "provider": provider, "model": target,
+                    "error": f"Impossibile raggiungere Ollama su {host} ({exc}).",
+                    "hint": "Avvia Ollama in ascolto su tutte le interfacce "
+                            "(OLLAMA_HOST=0.0.0.0:11434 ollama serve). Se l'app gira nel "
+                            "cluster usa http://host.docker.internal:11434, non localhost.",
+                }
+            models = [m.get("name", "") for m in r.json().get("models", [])]
+            has_model = any(m == target or m.startswith(f"{target}:") or target in m for m in models)
+            detail = f"Ollama raggiungibile su {host}: {len(models)} modelli installati."
             if models and not has_model:
-                detail += f" Attenzione: il modello '{target}' non risulta installato."
-            return {"ok": True, "provider": provider, "model": target, "detail": detail}
+                shown = ", ".join(models[:8])
+                detail += f" Attenzione: '{target}' non è tra i modelli installati ({shown})."
+            return {"ok": True, "provider": provider, "model": target, "models": models, "detail": detail}
 
         return {"ok": False, "provider": provider, "error": f"Provider sconosciuto: {provider}"}
     except Exception as exc:  # noqa: BLE001
         log.warning("Test provider %s fallito: %s", provider, exc)
         return {"ok": False, "provider": provider, "error": f"{type(exc).__name__}: {exc}"}
+
+
+def list_ollama_models() -> dict:
+    """Return the models installed on the configured Ollama host (for the UI)."""
+    host = settings.ollama_host.rstrip("/")
+    try:
+        r = httpx.get(f"{host}/api/tags", timeout=10.0)
+        r.raise_for_status()
+        models = sorted(m.get("name", "") for m in r.json().get("models", []) if m.get("name"))
+        return {"ok": True, "host": host, "models": models}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "host": host, "models": [], "error": f"{type(exc).__name__}: {exc}"}

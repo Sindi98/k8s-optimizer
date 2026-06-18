@@ -240,7 +240,10 @@ kubectl -n demo-apps get pods
 2. Clicca una riga per aprire il **drawer** di dettaglio: problemi rilevati,
    confronto *attuale → consigliato* e snippet `resources:` YAML pronto da copiare.
 3. **✦ Genera report AI**: produce un report prioritizzato in Markdown
-   (scaricabile) a partire dai numeri già calcolati.
+   (scaricabile) a partire dai numeri già calcolati. In alto trovi **provider e
+   modello** usati; se il provider AI non risponde, l'app genera comunque il
+   report con `mock` e lo segnala con un banner «fallback» (così sai sempre cosa
+   stai leggendo).
 4. **⚙ Configura**: il pannello con cui si configura tutto il sistema a caldo —
    sorgente dati, Prometheus, modello AI (con "Test connessione") e le soglie di
    ottimizzazione. "Salva e rianalizza" applica e ricalcola subito.
@@ -288,7 +291,9 @@ Tutti i provider sono già inclusi nell'immagine e selezionabili da **⚙ Config
   `http://host.docker.internal:11434` (l'app gira *nel* cluster, quindi `localhost`
   sarebbe il pod stesso — `host.docker.internal` punta invece al tuo host; nel
   manifest della demo questo valore è già preimpostato), **Modello Ollama** =
-  esattamente il nome scaricato (es. `llama3.1`). Poi «Test connessione».
+  esattamente il nome scaricato. Usa **«Carica modelli installati»** per popolare
+  l'elenco direttamente dall'host e sceglierne uno (va bene qualsiasi modello
+  installato, anche `gemma4` se l'hai scaricato), poi «Test connessione».
 
   > Se esegui il backend in locale (`make run-local`, non nel cluster), usa invece
   > **Host Ollama** = `http://localhost:11434`.
