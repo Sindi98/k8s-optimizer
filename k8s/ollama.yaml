@@ -1,0 +1,141 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Ollama IN-CLUSTER + download del modello, per usare un LLM locale come
+# provider dell'optimizer (LLM_PROVIDER=ollama) senza Ollama sull'host.
+#
+#   kubectl apply -f k8s/ollama.yaml
+#   kubectl -n ollama rollout status deploy/ollama
+#   kubectl -n ollama logs job/ollama-pull -f        # avanzamento del download
+#
+# Poi nell'optimizer ("⚙ Configura → Modello AI", nessun redeploy):
+#   Provider      = ollama
+#   Host Ollama   = http://ollama.ollama.svc:11434
+#   Modello Ollama = gemma4        (lo stesso scaricato dal Job qui sotto)
+#
+# NOTA RAM: l'inferenza CPU è lenta e i modelli stanno in memoria. Assicurati che
+# Docker Desktop abbia abbastanza RAM (Settings → Resources, ≥ 8 GB) e per la demo
+# preferisci un modello piccolo.
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: ollama
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: ollama-models
+  namespace: ollama
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 20Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama
+  namespace: ollama
+  labels:
+    app: ollama
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: ollama
+  template:
+    metadata:
+      labels:
+        app: ollama
+    spec:
+      containers:
+        - name: ollama
+          image: ollama/ollama:latest
+          env:
+            # Ascolta su tutte le interfacce, così il Service lo raggiunge.
+            - name: OLLAMA_HOST
+              value: "0.0.0.0:11434"
+          ports:
+            - containerPort: 11434
+              name: http
+          volumeMounts:
+            - name: models
+              mountPath: /root/.ollama
+          resources:
+            requests:
+              cpu: "500m"
+              memory: 2Gi
+            limits:
+              cpu: "4"
+              memory: 6Gi
+          readinessProbe:
+            httpGet: { path: /, port: 11434 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /, port: 11434 }
+            initialDelaySeconds: 20
+            periodSeconds: 30
+      volumes:
+        - name: models
+          persistentVolumeClaim:
+            claimName: ollama-models
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama
+  namespace: ollama
+spec:
+  selector:
+    app: ollama
+  ports:
+    - name: http
+      port: 11434
+      targetPort: 11434
+---
+# Scarica il modello SUL server: `ollama pull` verso un OLLAMA_HOST remoto fa
+# scaricare il modello al server (resta sul PVC). Job idempotente e rilanciabile.
+#
+# Cambia MODEL se "gemma4" non è disponibile nel registry Ollama
+# (vedi https://ollama.com/library). Alternative leggere per CPU:
+#   gemma3:1b · gemma2:2b · qwen2.5:3b · llama3.2:3b
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-pull
+  namespace: ollama
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: ollama-pull
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: pull
+          image: ollama/ollama:latest
+          env:
+            - name: OLLAMA_HOST
+              value: "ollama.ollama.svc:11434"
+            - name: MODEL
+              value: "gemma4"
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              echo "Attendo il server Ollama su $OLLAMA_HOST ..."
+              until ollama list >/dev/null 2>&1; do sleep 3; done
+              echo "Scarico il modello: $MODEL"
+              ollama pull "$MODEL"
+              echo "Modelli disponibili sul server:"
+              ollama list
+          resources:
+            requests:
+              cpu: "100m"
+              memory: 128Mi
+            limits:
+              cpu: "500m"
+              memory: 256Mi
