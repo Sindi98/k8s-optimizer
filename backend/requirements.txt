@@ -4,6 +4,7 @@ httpx==0.28.1
 kubernetes==31.0.0
 pydantic==2.10.4
 
-# Optional LLM providers — install only the one you use.
-# anthropic==0.42.0
-# openai==1.59.0
+# LLM providers — inclusi così sono tutti selezionabili dalla UI senza
+# ricostruire l'immagine. ollama/mock non richiedono SDK.
+anthropic==0.42.0
+openai==1.59.2

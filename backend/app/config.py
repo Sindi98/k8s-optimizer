@@ -1,8 +1,35 @@
-"""Configuration loaded from environment variables (see .env.example)."""
+"""Configuration.
+
+Two layers, lowest to highest priority:
+
+1. **Environment variables** — the defaults baked in at boot (see `.env.example`).
+2. **Runtime overrides** — written from the configuration UI via the API and
+   persisted to a JSON file (`CONFIG_PATH`). These win over the environment and
+   survive restarts as long as the file lives on a durable volume.
+
+The whole point of this module is that *everything* the operator might want to
+tune — the LLM provider, its model/credentials, the Prometheus endpoint, the
+analysis window and every optimisation threshold — can be changed live from the
+graphical interface, without rebuilding the image or editing the Deployment.
+
+`settings` is a single mutable object: other modules `from .config import
+settings` and read attributes at call time, so an in-place update is visible
+everywhere. Components that cache a derived client (Prometheus/Kubernetes)
+register an `on_change` callback to invalidate themselves.
+"""
 from __future__ import annotations
 
+import json
+import logging
 import os
+import re
+import tempfile
+import threading
 from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Callable
+
+log = logging.getLogger("config")
 
 
 def _get_bool(name: str, default: bool = False) -> bool:
@@ -61,3 +88,221 @@ class Settings:
 
 
 settings = Settings()
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Runtime configuration: schema, validation, persistence
+# ──────────────────────────────────────────────────────────────────────────
+
+# Where runtime overrides are stored. In-cluster this points at a mounted
+# volume (see k8s manifests). Locally it defaults to a temp file so config
+# survives `--reload` restarts. Persistence is best-effort: if the path is not
+# writable the app keeps the config in memory and logs a warning.
+CONFIG_PATH: str = os.getenv("CONFIG_PATH") or str(
+    Path(tempfile.gettempdir()) / "kube-optimizer-config.json"
+)
+
+# Fields the UI may change, with the type used to coerce incoming JSON.
+EDITABLE_FIELDS: dict[str, type] = {
+    "demo_mode": bool,
+    "in_cluster": bool,
+    "kubeconfig": str,
+    "prometheus_url": str,
+    "analysis_window": str,
+    "prom_timeout": float,
+    "llm_provider": str,
+    "report_language": str,
+    "anthropic_api_key": str,
+    "anthropic_model": str,
+    "openai_api_key": str,
+    "openai_model": str,
+    "ollama_host": str,
+    "ollama_model": str,
+    "overprov_ratio": float,
+    "request_buffer": float,
+    "limit_buffer": float,
+    "risk_ratio": float,
+    "throttle_ratio": float,
+    "idle_cpu_cores": float,
+}
+
+# Never echoed back to the client; only a "<field>_set" boolean is exposed.
+SECRET_FIELDS = {"anthropic_api_key", "openai_api_key"}
+# Optional string fields that should become None when blank.
+NULLABLE_STR_FIELDS = {"kubeconfig", "anthropic_api_key", "openai_api_key"}
+
+VALID_PROVIDERS = {"mock", "anthropic", "ollama", "openai"}
+MASK = "••••••••"
+_WINDOW_RE = re.compile(r"^(\d+[smhdwy])+$")
+
+_lock = threading.Lock()
+_on_change: list[Callable[[], None]] = []
+
+
+def register_on_change(fn: Callable[[], None]) -> None:
+    """Register a callback fired after any successful config change.
+
+    Used by cached clients (Prometheus/Kubernetes) to drop stale instances.
+    """
+    _on_change.append(fn)
+
+
+def _coerce(name: str, value: Any) -> Any:
+    typ = EDITABLE_FIELDS[name]
+    if typ is bool:
+        if isinstance(value, str):
+            return value.strip().lower() in {"1", "true", "yes", "on"}
+        return bool(value)
+    if typ is float:
+        return float(value)
+    # string
+    if value is None:
+        return None
+    text = str(value).strip()
+    if text == "" and name in NULLABLE_STR_FIELDS:
+        return None
+    return text
+
+
+def _validate(name: str, value: Any) -> str | None:
+    """Return an error message for a (coerced) value, or None if valid."""
+    if name == "llm_provider" and value not in VALID_PROVIDERS:
+        return f"Provider non valido: '{value}'. Ammessi: {', '.join(sorted(VALID_PROVIDERS))}."
+    if name == "analysis_window":
+        if not value or not _WINDOW_RE.match(str(value)):
+            return "Finestra non valida (es. 24h, 7d, 2w)."
+    if name == "prometheus_url" and value and not str(value).startswith(("http://", "https://")):
+        return "L'URL di Prometheus deve iniziare con http:// o https://."
+    if name == "prom_timeout" and not (0 < float(value) <= 600):
+        return "Timeout Prometheus fuori range (0 < t ≤ 600 s)."
+    # ratios expressed as a fraction of request/limit
+    if name in {"overprov_ratio", "risk_ratio", "throttle_ratio"} and not (0 < float(value) <= 1):
+        return f"{name} deve essere compreso tra 0 e 1."
+    # buffers are multipliers applied on top of observed usage
+    if name in {"request_buffer", "limit_buffer"} and not (1.0 <= float(value) <= 5.0):
+        return f"{name} deve essere compreso tra 1.0 e 5.0."
+    if name == "idle_cpu_cores" and not (0 <= float(value) <= 1):
+        return "idle_cpu_cores deve essere compreso tra 0 e 1 (core)."
+    return None
+
+
+def _clean_payload(data: dict) -> tuple[dict, dict]:
+    """Coerce + validate an incoming payload.
+
+    Returns (clean_values, errors). Unknown keys are ignored. Secret fields that
+    arrive empty or still masked are dropped so the existing value is kept.
+    """
+    clean: dict[str, Any] = {}
+    errors: dict[str, str] = {}
+    for key, raw in data.items():
+        if key not in EDITABLE_FIELDS:
+            continue
+        if key in SECRET_FIELDS and (raw is None or str(raw).strip() in {"", MASK}):
+            continue  # keep the stored secret untouched
+        try:
+            value = _coerce(key, raw)
+        except (TypeError, ValueError):
+            errors[key] = f"Valore non valido per {key}: {raw!r}."
+            continue
+        err = _validate(key, value)
+        if err:
+            errors[key] = err
+        else:
+            clean[key] = value
+    return clean, errors
+
+
+def _apply(values: dict) -> None:
+    for key, value in values.items():
+        setattr(settings, key, value)
+    settings.llm_provider = (settings.llm_provider or "mock").lower()
+
+
+def _persist() -> None:
+    try:
+        path = Path(CONFIG_PATH)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        snapshot = {key: getattr(settings, key) for key in EDITABLE_FIELDS}
+        path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False))
+        log.info("Configurazione salvata in %s", CONFIG_PATH)
+    except OSError as exc:
+        log.warning("Configurazione non persistita (%s non scrivibile): %s", CONFIG_PATH, exc)
+
+
+def load_persisted() -> None:
+    """Load and apply runtime overrides from disk, if present. Called at boot."""
+    path = Path(CONFIG_PATH)
+    if not path.exists():
+        return
+    try:
+        stored = json.loads(path.read_text())
+    except (OSError, ValueError) as exc:
+        log.warning("Impossibile leggere %s: %s", CONFIG_PATH, exc)
+        return
+    clean, errors = _clean_payload(stored)
+    if errors:
+        log.warning("Override ignorati (non validi) da %s: %s", CONFIG_PATH, errors)
+    _apply(clean)
+    log.info("Override di configurazione caricati da %s", CONFIG_PATH)
+
+
+def update(data: dict) -> dict:
+    """Validate, apply and persist a partial config update.
+
+    Raises ``ConfigError`` (with a per-field error map) if anything is invalid.
+    Fires the on_change callbacks so cached clients refresh.
+    """
+    clean, errors = _clean_payload(data)
+    if errors:
+        raise ConfigError(errors)
+    with _lock:
+        _apply(clean)
+        _persist()
+    for fn in _on_change:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001 - a bad callback must not break config
+            log.exception("on_change callback fallita")
+    return public_dict()
+
+
+def reset() -> dict:
+    """Drop all runtime overrides and fall back to environment defaults."""
+    with _lock:
+        for key, value in vars(Settings()).items():
+            setattr(settings, key, value)
+        try:
+            Path(CONFIG_PATH).unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning("Impossibile rimuovere %s: %s", CONFIG_PATH, exc)
+    for fn in _on_change:
+        try:
+            fn()
+        except Exception:  # noqa: BLE001
+            log.exception("on_change callback fallita")
+    return public_dict()
+
+
+def public_dict() -> dict[str, Any]:
+    """Current config for the UI. Secrets are reported only as a boolean flag."""
+    out: dict[str, Any] = {}
+    for key in EDITABLE_FIELDS:
+        if key in SECRET_FIELDS:
+            out[f"{key}_set"] = bool(getattr(settings, key))
+        else:
+            out[key] = getattr(settings, key)
+    out["config_path"] = CONFIG_PATH
+    out["config_persisted"] = Path(CONFIG_PATH).exists()
+    return out
+
+
+class ConfigError(ValueError):
+    """Raised when a config update fails validation. Carries a field->msg map."""
+
+    def __init__(self, errors: dict[str, str]):
+        self.errors = errors
+        super().__init__("; ".join(f"{k}: {v}" for k, v in errors.items()))
+
+
+# Apply any persisted overrides as soon as the module is imported.
+load_persisted()

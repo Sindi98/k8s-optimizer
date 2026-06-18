@@ -235,3 +235,60 @@ def generate_report(analysis: NamespaceAnalysis) -> dict:
             "markdown": fallback,
             "fallback": True,
         }
+
+
+# --- connection test (used by the configuration UI) -------------------------
+
+def test_provider() -> dict:
+    """Cheaply validate that the currently configured LLM provider works.
+
+    Returns ``{"ok": bool, "provider": str, ...}``. Used by the settings panel's
+    "Test connessione" button so the operator gets immediate feedback on the
+    credentials/host before relying on them for a real report.
+    """
+    provider = settings.llm_provider
+    try:
+        if provider == "mock":
+            return {"ok": True, "provider": provider,
+                    "detail": "Report generato localmente, nessuna chiamata esterna."}
+
+        if provider == "anthropic":
+            if not settings.anthropic_api_key:
+                return {"ok": False, "provider": provider, "error": "ANTHROPIC_API_KEY mancante."}
+            import anthropic
+            client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+            client.messages.create(
+                model=settings.anthropic_model, max_tokens=4,
+                messages=[{"role": "user", "content": "ping"}],
+            )
+            return {"ok": True, "provider": provider, "model": settings.anthropic_model,
+                    "detail": "Connessione a Claude riuscita."}
+
+        if provider == "openai":
+            if not settings.openai_api_key:
+                return {"ok": False, "provider": provider, "error": "OPENAI_API_KEY mancante."}
+            from openai import OpenAI
+            client = OpenAI(api_key=settings.openai_api_key)
+            client.chat.completions.create(
+                model=settings.openai_model, max_tokens=4,
+                messages=[{"role": "user", "content": "ping"}],
+            )
+            return {"ok": True, "provider": provider, "model": settings.openai_model,
+                    "detail": "Connessione a OpenAI riuscita."}
+
+        if provider == "ollama":
+            url = f"{settings.ollama_host.rstrip('/')}/api/tags"
+            r = httpx.get(url, timeout=10.0)
+            r.raise_for_status()
+            models = [m.get("name", "") for m in r.json().get("models", [])]
+            target = settings.ollama_model
+            has_model = any(target in m for m in models)
+            detail = f"Ollama raggiungibile ({len(models)} modelli installati)."
+            if models and not has_model:
+                detail += f" Attenzione: il modello '{target}' non risulta installato."
+            return {"ok": True, "provider": provider, "model": target, "detail": detail}
+
+        return {"ok": False, "provider": provider, "error": f"Provider sconosciuto: {provider}"}
+    except Exception as exc:  # noqa: BLE001
+        log.warning("Test provider %s fallito: %s", provider, exc)
+        return {"ok": False, "provider": provider, "error": f"{type(exc).__name__}: {exc}"}

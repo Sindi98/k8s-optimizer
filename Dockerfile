@@ -5,11 +5,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Backend deps
+# Backend deps (include i provider LLM, tutti selezionabili dalla UI)
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir -r backend/requirements.txt
-# Per usare Claude o OpenAI come provider, scommentare:
-# RUN pip install --no-cache-dir anthropic openai
 
 # App code + frontend
 COPY backend/ ./backend/

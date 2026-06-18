@@ -1,13 +1,21 @@
 # ──────────────────────────────────────────────────────────────────────────
-# Kube Optimizer — deploy in-cluster
+# Reclaim · Kube Optimizer — DEMO su Docker Desktop (Kubernetes)
 #
-# RBAC strettamente in sola lettura: l'app NON può modificare nulla nel
-# cluster, legge soltanto pod / namespace per l'analisi. Le raccomandazioni
-# (es. snippet `resources:`) vanno applicate manualmente o via GitOps.
+# Pensato per un cluster Kubernetes di Docker Desktop con una registry locale su
+#   host.docker.internal:5050
 #
-#   kubectl apply -f k8s/deploy.yaml
+# Modalità LIVE: analizza i pod reali del cluster (RBAC in sola lettura) usando
+# il Prometheus della demo (k8s/prometheus-demo.yaml). Tutta la configurazione
+# — provider LLM, soglie, endpoint, finestra — è poi modificabile dalla UI
+# ("⚙ Configura") e viene salvata sul volume persistente montato in /data.
+#
+# Deploy completo automatizzato:   ./scripts/demo-deploy.sh
+# Oppure a mano:
+#   kubectl apply -f k8s/prometheus-demo.yaml
+#   kubectl apply -f k8s/demo-docker-desktop.yaml
+#   kubectl -n kube-optimizer rollout status deploy/kube-optimizer
 #   kubectl -n kube-optimizer port-forward svc/kube-optimizer 8080:80
-#   # poi apri http://localhost:8080
+#   # apri http://localhost:8080
 # ──────────────────────────────────────────────────────────────────────────
 apiVersion: v1
 kind: Namespace
@@ -42,6 +50,17 @@ subjects:
     name: kube-optimizer
     namespace: kube-optimizer
 ---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: kube-optimizer-config
+  namespace: kube-optimizer
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 64Mi
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -63,44 +82,39 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
+        fsGroup: 10001
         seccompProfile:
           type: RuntimeDefault
       containers:
         - name: app
-          # Sostituisci con la tua immagine (es. registry interno Quay/Nexus)
-          image: REGISTRY/kube-optimizer:1.0.0
-          imagePullPolicy: IfNotPresent
+          # Immagine sulla registry locale di Docker Desktop.
+          # host.docker.internal risolve sia dall'host (docker push) sia da
+          # dentro il cluster (pull del kubelet).
+          image: host.docker.internal:5050/kube-optimizer:dev
+          imagePullPolicy: Always
           ports:
             - containerPort: 8080
           env:
+            # LIVE: analizza il cluster reale, non i dati sintetici.
             - name: DEMO_MODE
               value: "false"
             - name: IN_CLUSTER
               value: "true"
-            # Prometheus in-cluster (adatta a service/namespace del tuo stack).
-            # Esempio kube-prometheus-stack:
+            # Prometheus della demo (k8s/prometheus-demo.yaml).
             - name: PROMETHEUS_URL
-              value: "http://prometheus-operated.monitoring.svc:9090"
+              value: "http://prometheus.monitoring.svc:9090"
+            # Finestra breve: la demo mostra dati pochi minuti dopo l'avvio.
             - name: ANALYSIS_WINDOW
-              value: "7d"
-            # Provider AI. "mock" non richiede nulla; "ollama" tiene i dati in-house.
+              value: "1h"
+            # Provider AI di default: locale, zero chiamate esterne.
+            # Cambia provider/modello/chiavi dalla UI ("⚙ Configura").
             - name: LLM_PROVIDER
               value: "mock"
             - name: REPORT_LANGUAGE
               value: "it"
-            # Override di configurazione modificati dalla UI (provider, soglie,
-            # endpoint…) vengono salvati qui, su un volume persistente.
+            # Config modificata dalla UI: salvata sul volume persistente.
             - name: CONFIG_PATH
               value: "/data/config.json"
-            # Se usi Ollama in-cluster:
-            # - name: OLLAMA_HOST
-            #   value: "http://ollama.ai.svc:11434"
-            # - name: OLLAMA_MODEL
-            #   value: "llama3.1"
-            # Se usi Claude/OpenAI, monta la chiave da un Secret:
-            # - name: ANTHROPIC_API_KEY
-            #   valueFrom:
-            #     secretKeyRef: { name: kube-optimizer-llm, key: anthropic-api-key }
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true
@@ -114,7 +128,6 @@ spec:
               cpu: 500m
               memory: 384Mi
           volumeMounts:
-            # Config scritta dalla UI (filesystem root è read-only).
             - name: config
               mountPath: /data
             - name: tmp
@@ -133,17 +146,6 @@ spec:
             claimName: kube-optimizer-config
         - name: tmp
           emptyDir: {}
----
-apiVersion: v1
-kind: PersistentVolumeClaim
-metadata:
-  name: kube-optimizer-config
-  namespace: kube-optimizer
-spec:
-  accessModes: ["ReadWriteOnce"]
-  resources:
-    requests:
-      storage: 64Mi
 ---
 apiVersion: v1
 kind: Service
