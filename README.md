@@ -114,6 +114,9 @@ registry locale su `host.docker.internal:5050`. In questa demo l'app gira in
 usa un Prometheus minimale incluso che raccoglie le metriche cAdvisor del kubelet
 (Docker Desktop non ne ha uno di suo).
 
+> 📘 **Guida completa passo-passo** (installazione dei componenti, workload di
+> esempio, diagnostica e troubleshooting): [`docs/DEMO.md`](docs/DEMO.md).
+
 **Prerequisiti**
 
 1. Docker Desktop con **Kubernetes attivo** (Settings → Kubernetes → Enable).
@@ -220,12 +223,15 @@ kube-optimizer/
 ├── frontend/
 │   └── index.html          # dashboard + pannello di configurazione
 ├── k8s/
-│   ├── deploy.yaml             # deploy in-cluster generico (+ PVC config)
+│   ├── deploy.yaml              # deploy in-cluster generico (+ PVC config)
 │   ├── demo-docker-desktop.yaml # demo live su Docker Desktop
-│   └── prometheus-demo.yaml     # Prometheus minimale (cAdvisor) per la demo
+│   ├── prometheus-demo.yaml     # Prometheus minimale (cAdvisor) per la demo
+│   └── demo-workloads.yaml      # workload di esempio (namespace demo-apps)
 ├── scripts/
 │   ├── demo-deploy.sh      # demo end-to-end (registry+build+push+deploy)
 │   └── local-registry.sh   # registry locale host.docker.internal:5050
+├── docs/
+│   └── DEMO.md             # guida completa all'ambiente di demo
 ├── Makefile
 └── Dockerfile
 ```

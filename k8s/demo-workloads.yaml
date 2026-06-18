@@ -1,0 +1,136 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Workload di ESEMPIO per la demo (namespace: demo-apps)
+#
+# Su un Docker Desktop appena installato ci sono solo pod di sistema, poco
+# interessanti da ottimizzare. Questi workload sono dimensionati apposta per
+# innescare OGNI tipo di rilevazione dell'optimizer, usando metriche reali
+# raccolte dal Prometheus della demo (cAdvisor):
+#
+#   • overprovisioned-web  → CPU/memoria sovradimensionate (+ inattivo)
+#   • cpu-throttled        → CPU in throttling (limite troppo basso)
+#   • memory-pressure      → rischio OOM (uso vicino al limite di memoria)
+#   • besteffort-worker    → requests/limits assenti (QoS BestEffort)
+#
+# Tutte le immagini sono pubbliche su Docker Hub (non serve la registry locale).
+#
+#   kubectl apply -f k8s/demo-workloads.yaml      # oppure: make demo-workloads
+#
+# Attendi 3-5 minuti che Prometheus raccolga campioni, poi seleziona il
+# namespace "demo-apps" nella dashboard. Con finestre brevi (es. 15m) i risultati
+# arrivano prima: impostala dal pannello "⚙ Configura".
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: demo-apps
+  labels:
+    app.kubernetes.io/part-of: reclaim-demo
+---
+# 1) Sovradimensionato + inattivo: chiede 500m CPU / 512Mi ma resta praticamente
+#    fermo (nginx idle usa ~2m CPU e ~10Mi). → CPU e memoria recuperabili.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: overprovisioned-web
+  namespace: demo-apps
+  labels: { app: overprovisioned-web }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: overprovisioned-web }
+  template:
+    metadata:
+      labels: { app: overprovisioned-web }
+    spec:
+      containers:
+        - name: nginx
+          image: nginx:1.27-alpine
+          ports:
+            - containerPort: 80
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+---
+# 2) CPU in throttling: due worker di calcolo contro un limite di 100m.
+#    → throttling vicino al 95%, segnalato come problema di affidabilità.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cpu-throttled
+  namespace: demo-apps
+  labels: { app: cpu-throttled }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: cpu-throttled }
+  template:
+    metadata:
+      labels: { app: cpu-throttled }
+    spec:
+      containers:
+        - name: stress
+          image: polinux/stress:latest
+          command: ["stress"]
+          args: ["--cpu", "2"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 32Mi
+            limits:
+              cpu: 100m
+              memory: 64Mi
+---
+# 3) Rischio OOM: tiene ~234Mi residenti contro un limite di 256Mi (~91%).
+#    Sopra la soglia di rischio (90%) ma con margine per non andare in OOMKill.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: memory-pressure
+  namespace: demo-apps
+  labels: { app: memory-pressure }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: memory-pressure }
+  template:
+    metadata:
+      labels: { app: memory-pressure }
+    spec:
+      containers:
+        - name: stress
+          image: polinux/stress:latest
+          command: ["stress"]
+          args: ["--vm", "1", "--vm-bytes", "245M", "--vm-keep"]
+          resources:
+            requests:
+              cpu: 50m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+---
+# 4) Requests/limits assenti: QoS BestEffort, primo candidato all'eviction.
+#    → segnalazione "Requests assenti" / "Limits assenti".
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: besteffort-worker
+  namespace: demo-apps
+  labels: { app: besteffort-worker }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: besteffort-worker }
+  template:
+    metadata:
+      labels: { app: besteffort-worker }
+    spec:
+      containers:
+        - name: worker
+          image: busybox:1.36
+          command: ["sh", "-c", "while true; do sleep 3600; done"]
+          # nessun blocco resources: QoS BestEffort di proposito

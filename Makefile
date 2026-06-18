@@ -9,7 +9,7 @@ IMAGE    ?= $(REGISTRY)/kube-optimizer
 TAG      ?= dev
 REF      := $(IMAGE):$(TAG)
 
-.PHONY: help run-local registry build push deploy demo undeploy port-forward logs
+.PHONY: help run-local registry build push deploy demo demo-workloads undeploy port-forward logs
 
 help: ## Mostra questo aiuto
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
@@ -37,6 +37,10 @@ deploy: ## Applica i manifest (Prometheus demo + optimizer live)
 demo: ## Demo completa su Docker Desktop (registry + build + push + deploy + port-forward)
 	bash scripts/demo-deploy.sh
 
+demo-workloads: ## Installa i workload di esempio (namespace demo-apps)
+	kubectl apply -f k8s/demo-workloads.yaml
+	kubectl -n demo-apps rollout status deploy/overprovisioned-web --timeout=120s
+
 port-forward: ## Port-forward del servizio su http://localhost:8080
 	kubectl -n kube-optimizer port-forward svc/kube-optimizer 8080:80
 
@@ -44,5 +48,6 @@ logs: ## Segui i log dell'optimizer
 	kubectl -n kube-optimizer logs -f deploy/kube-optimizer
 
 undeploy: ## Rimuove tutto dal cluster
+	-kubectl delete -f k8s/demo-workloads.yaml
 	-kubectl delete -f k8s/demo-docker-desktop.yaml
 	-kubectl delete -f k8s/prometheus-demo.yaml
