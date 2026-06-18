@@ -209,6 +209,16 @@ kubectl apply -f k8s/demo-workloads.yaml
 | `cpu-throttled` | CPU in throttling (limite troppo basso) | critical |
 | `memory-pressure` | rischio OOM (uso ~91% del limite di memoria) | critical |
 | `besteffort-worker` | requests/limits assenti (QoS BestEffort) | warning |
+| `node-exporter` | sovradimensionato + inattivo; target Prometheus reale | warning |
+
+**Come Prometheus monitora questi pod.** L'optimizer analizza l'**uso delle
+risorse** preso da **cAdvisor**, che il Prometheus della demo raccoglie per
+*ogni* pod del cluster: per questo i workload sopra sono già pienamente misurati,
+senza bisogno di annotazioni. Il pod `node-exporter` è inoltre **esplicitamente
+abilitato a Prometheus** con le annotazioni `prometheus.io/scrape|port|path` ed
+espone davvero `/metrics`: viene raccolto dal job `kubernetes-pods` del Prometheus
+della demo (vedi `k8s/prometheus-demo.yaml`). Puoi verificarlo su
+`http://localhost:9090/targets` (target `kubernetes-pods` = UP).
 
 Verifica che siano in esecuzione:
 ```bash
