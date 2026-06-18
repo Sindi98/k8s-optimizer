@@ -1,0 +1,14 @@
+# Tooling condiviso per lint (ruff) e test (pytest).
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+# E/W pycodestyle, F pyflakes, B bugbear. La lunghezza riga e i call-in-default
+# (FastAPI usa Body(...)/Query(...) come default) sono volutamente esclusi.
+select = ["E", "W", "F", "B"]
+ignore = ["E501", "B008"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+addopts = "-q"

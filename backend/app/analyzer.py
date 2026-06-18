@@ -24,7 +24,6 @@ from .models import (
 from .util import (
     format_cpu,
     format_memory,
-    cores_to_millicores,
     round_millicores,
     round_memory_mi,
 )

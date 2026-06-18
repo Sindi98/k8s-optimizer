@@ -1,5 +1,7 @@
 # Reclaim · Kubernetes resource optimizer
 
+[![CI](https://github.com/Sindi98/k8s-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/Sindi98/k8s-optimizer/actions/workflows/ci.yml)
+
 Analizza i pod di un cluster Kubernetes usando le metriche reali di **Prometheus**
 e il **Kubernetes API**, calcola le ottimizzazioni di risorse (right-sizing di
 `requests`/`limits`, throttling, rischio OOM, pod inattivi) e genera un **report
@@ -232,9 +234,31 @@ kube-optimizer/
 │   └── local-registry.sh   # registry locale host.docker.internal:5050
 ├── docs/
 │   └── DEMO.md             # guida completa all'ambiente di demo
+├── .github/workflows/
+│   └── ci.yml              # CI: lint + test backend, JS, build immagine
+├── pyproject.toml          # config ruff + pytest
 ├── Makefile
 └── Dockerfile
 ```
+
+## Sviluppo e CI
+
+```bash
+cd backend
+python3 -m venv .venv && . .venv/bin/activate
+pip install -r requirements-dev.txt   # runtime + pytest + ruff
+
+ruff check app tests conftest.py      # lint
+pytest                                # test (demo mode, nessun cluster)
+```
+
+La pipeline **GitHub Actions** (`.github/workflows/ci.yml`) gira a ogni push su
+`master` e a ogni pull request:
+
+- **Backend** — `ruff` (lint) + `pytest` (util, analyzer, configurazione runtime e
+  API in modalità demo, validazione dei manifest).
+- **Frontend** — compile-check della dashboard JS.
+- **Image** — build dell'immagine container (senza push).
 
 ## Soglie (tutte configurabili)
 
