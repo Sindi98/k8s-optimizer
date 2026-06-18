@@ -21,7 +21,6 @@ import httpx
 
 from .config import settings
 from .models import NamespaceAnalysis
-from .util import format_cpu, format_memory
 
 log = logging.getLogger("llm")
 

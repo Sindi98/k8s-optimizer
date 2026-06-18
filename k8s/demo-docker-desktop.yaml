@@ -112,6 +112,11 @@ spec:
               value: "mock"
             - name: REPORT_LANGUAGE
               value: "it"
+            # Host Ollama predefinito per l'uso in-cluster: l'app raggiunge un
+            # Ollama in esecuzione sull'host tramite host.docker.internal. Avvia
+            # Ollama con OLLAMA_HOST=0.0.0.0:11434 (vedi docs/DEMO.md §7).
+            - name: OLLAMA_HOST
+              value: "http://host.docker.internal:11434"
             # Config modificata dalla UI: salvata sul volume persistente.
             - name: CONFIG_PATH
               value: "/data/config.json"

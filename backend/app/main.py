@@ -94,7 +94,7 @@ def namespaces():
         return {"namespaces": _k8s().list_namespaces()}
     except Exception as exc:  # noqa: BLE001
         log.exception("Failed to list namespaces")
-        raise HTTPException(status_code=502, detail=f"Errore connessione al cluster: {exc}")
+        raise HTTPException(status_code=502, detail=f"Errore connessione al cluster: {exc}") from exc
 
 
 @app.get("/api/analysis")
@@ -104,7 +104,7 @@ def analysis(namespace: str = Query(..., min_length=1)):
         return result.to_dict()
     except Exception as exc:  # noqa: BLE001
         log.exception("Analysis failed")
-        raise HTTPException(status_code=502, detail=f"Analisi fallita: {exc}")
+        raise HTTPException(status_code=502, detail=f"Analisi fallita: {exc}") from exc
 
 
 class ReportRequest(BaseModel):
@@ -117,7 +117,7 @@ def report(req: ReportRequest):
         result = _run_analysis(req.namespace)
     except Exception as exc:  # noqa: BLE001
         log.exception("Analysis failed before report")
-        raise HTTPException(status_code=502, detail=f"Analisi fallita: {exc}")
+        raise HTTPException(status_code=502, detail=f"Analisi fallita: {exc}") from exc
     return JSONResponse(llm.generate_report(result))
 
 
@@ -135,10 +135,10 @@ def put_config(payload: dict = Body(...)):
         return config.update(payload)
     except config.ConfigError as exc:
         # field-level validation errors so the UI can highlight the bad inputs
-        raise HTTPException(status_code=400, detail={"message": "Configurazione non valida", "errors": exc.errors})
+        raise HTTPException(status_code=400, detail={"message": "Configurazione non valida", "errors": exc.errors}) from exc
     except Exception as exc:  # noqa: BLE001
         log.exception("Config update failed")
-        raise HTTPException(status_code=500, detail=f"Aggiornamento configurazione fallito: {exc}")
+        raise HTTPException(status_code=500, detail=f"Aggiornamento configurazione fallito: {exc}") from exc
 
 
 @app.post("/api/config/reset")

@@ -256,16 +256,42 @@ Tutti i provider sono già inclusi nell'immagine e selezionabili da **⚙ Config
 → Modello AI**. Usa "Test connessione" per validare subito chiavi/host.
 
 - **mock** (default): report generato localmente, nessuna chiamata esterna.
-- **Ollama** (LLM locale, nessun dato fuori dal cluster):
+- **Ollama** — LLM in locale, nessun dato esce dalla tua macchina. Tre passi:
+
+  **1. Installa Ollama** sull'host:
   ```bash
-  # sull'host
-  brew install ollama           # macOS (o scarica da ollama.com)
-  ollama serve                  # avvia il server su :11434
-  ollama pull llama3.1          # scarica il modello
+  # macOS
+  brew install ollama          # oppure scarica l'app da https://ollama.com/download
+  # Linux
+  curl -fsSL https://ollama.com/install.sh | sh
+  # Windows: installer da https://ollama.com/download
   ```
-  Nella UI imposta provider `ollama` e **Host Ollama** =
-  `http://host.docker.internal:11434` (l'app gira nel cluster e raggiunge l'host
-  con questo nome). Modello: `llama3.1`.
+
+  **2. Avvia il server in ascolto su tutte le interfacce.** È il passo che fa
+  inciampare: di default Ollama ascolta solo su `127.0.0.1`, perciò rifiuta le
+  connessioni che arrivano dal pod (→ `[Errno 111] Connection refused`). Esponilo
+  su `0.0.0.0`:
+  ```bash
+  OLLAMA_HOST=0.0.0.0:11434 ollama serve
+  ```
+  (App macOS/Windows: imposta la variabile d'ambiente `OLLAMA_HOST=0.0.0.0:11434`
+  e riavvia Ollama.)
+
+  **3. Scarica un modello** (un nome che esiste davvero) e verifica:
+  ```bash
+  ollama pull llama3.1         # oppure: gemma3, qwen2.5, mistral …
+  ollama list                  # elenca i modelli installati
+  curl http://localhost:11434/api/tags   # deve rispondere con la lista in JSON
+  ```
+
+  Nella UI (**⚙ Configura → Modello AI**): provider `ollama`, **Host Ollama** =
+  `http://host.docker.internal:11434` (l'app gira *nel* cluster, quindi `localhost`
+  sarebbe il pod stesso — `host.docker.internal` punta invece al tuo host; nel
+  manifest della demo questo valore è già preimpostato), **Modello Ollama** =
+  esattamente il nome scaricato (es. `llama3.1`). Poi «Test connessione».
+
+  > Se esegui il backend in locale (`make run-local`, non nel cluster), usa invece
+  > **Host Ollama** = `http://localhost:11434`.
 - **Claude (anthropic)**: provider `anthropic`, incolla la `ANTHROPIC_API_KEY`,
   modello es. `claude-sonnet-4-6`. Richiede rete in uscita verso le API esterne.
 - **OpenAI**: provider `openai`, incolla la `OPENAI_API_KEY`, modello es.
@@ -314,6 +340,8 @@ kubectl -n monitoring port-forward deploy/prometheus 9090:9090
 | Nessun namespace nell'elenco / 403 nei log | RBAC | I manifest creano già la ClusterRole read-only; riapplica `k8s/demo-docker-desktop.yaml` |
 | `host.docker.internal` non risolve (Linux) | mapping host assente | Su Docker Desktop è gestito; se usi un altro runtime, sostituisci con l'IP dell'host o usa una registry in-cluster |
 | `cpu-throttled`/`memory-pressure` non mostrano dati | servono alcuni minuti di scrape | Attendi; verifica `kubectl -n demo-apps get pods` (Running) |
+| Test connessione Ollama → `[Errno 111] Connection refused` | host errato o Ollama legato a `127.0.0.1` | In-cluster usa `http://host.docker.internal:11434` **e** avvia Ollama con `OLLAMA_HOST=0.0.0.0:11434 ollama serve`; verifica con `curl localhost:11434/api/tags` (vedi §7) |
+| Report Ollama → modello non trovato | nome modello inesistente (es. `gemma4`) | Usa un nome reale: `ollama list` / `ollama pull llama3.1` e impostalo in «Modello Ollama» |
 | `memory-pressure` va in `OOMKilled`/`CrashLoopBackOff` | poco headroom sul nodo | È un caso limite: alza il limite a `300Mi` in `k8s/demo-workloads.yaml` o abbassa l'allocazione (`--vm-bytes 220M`) |
 
 ---
