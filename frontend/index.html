@@ -253,10 +253,61 @@
   @keyframes spin { to { transform: rotate(360deg); } }
   .err { color: var(--crit); }
 
+  /* ---------- settings ---------- */
+  .settings-card { width: 740px; }
+  .settings-card .mbody { flex: 1; min-height: 0; }
+  .sgroup { border-top: 1px solid var(--line); padding: 20px 0 6px; }
+  .sgroup:first-child { border-top: none; padding-top: 6px; }
+  .sgroup h3 { font-family:'Fraunces',serif; font-weight: 500; font-size: 17px; color: var(--text); }
+  .sgroup .sdesc { color: var(--muted); font-size: 12.5px; margin: 3px 0 14px; }
+  .field { display: grid; grid-template-columns: 190px 1fr; gap: 16px; align-items: center; padding: 8px 0; }
+  .field > label { font-size: 13px; color: var(--text); }
+  .field .hint { display: block; font-size: 11.5px; color: var(--muted-2); margin-top: 2px; font-weight: 400; }
+  .field input[type=text], .field input[type=password], .field input[type=number], .field select {
+    background: var(--ink-3); border: 1px solid var(--line); border-radius: 8px; height: 36px;
+    padding: 0 11px; width: 100%; color: var(--text); }
+  .field input::placeholder { color: var(--muted-2); }
+  .field input:focus, .field select:focus { outline: none; border-color: rgba(217,194,163,0.3); }
+  .field input.bad { border-color: var(--crit); background: rgba(209,86,75,0.06); }
+  .switchfield { grid-template-columns: 1fr auto; }
+  .switch { position: relative; display: inline-block; width: 42px; height: 24px; cursor: pointer; }
+  .switch input { opacity: 0; width: 0; height: 0; }
+  .switch .track { position: absolute; inset: 0; background: var(--track); border: 1px solid var(--line);
+    border-radius: 20px; transition: background .15s; }
+  .switch .track::before { content:""; position: absolute; left: 3px; top: 3px; width: 18px; height: 18px;
+    background: var(--muted); border-radius: 50%; transition: transform .15s, background .15s; }
+  .switch input:checked + .track { background: var(--wine-deep); border-color: transparent; }
+  .switch input:checked + .track::before { transform: translateX(18px); background: #FBEFEF; }
+  .prov { display: none; }
+  .prov.on { display: block; }
+  .testrow { display: flex; align-items: center; gap: 14px; padding: 14px 0 4px; }
+  .test-result { font-size: 12.5px; }
+  .test-result.ok { color: var(--ok); } .test-result.err { color: var(--crit); }
+  .rangefield { padding: 11px 0; }
+  .rangefield .rtop { display: flex; justify-content: space-between; align-items: baseline; }
+  .rangefield .rname { font-size: 13px; color: var(--text); }
+  .rangefield .rval { font-family:'JetBrains Mono',monospace; font-size: 13px; color: var(--champagne); }
+  .rangefield input[type=range] { width: 100%; accent-color: var(--wine); margin: 8px 0 3px; cursor: pointer; }
+  .rangefield .rhint { font-size: 11.5px; color: var(--muted-2); }
+  .sfoot { padding: 15px 28px; border-top: 1px solid var(--line); display: flex; align-items: center;
+    justify-content: space-between; gap: 14px; }
+  .sfoot-msg { font-size: 12.5px; color: var(--muted); flex: 1; }
+  .sfoot-msg.ok { color: var(--ok); } .sfoot-msg.err { color: var(--crit); }
+  .sfoot-btns { display: flex; gap: 10px; }
+
+  .toast { position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%) translateY(20px);
+    background: var(--ink-3); border: 1px solid var(--line); color: var(--text); padding: 11px 18px;
+    border-radius: 10px; font-size: 13px; box-shadow: var(--shadow); opacity: 0; pointer-events: none;
+    transition: opacity .2s, transform .2s; z-index: 80; }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
   @media (max-width: 860px) {
     .summary { grid-template-columns: repeat(2, 1fr); }
     .rvr { width: 120px; }
     thead th.hide, td.hide { display: none; }
+    .settings-card { width: 100%; }
+    .field { grid-template-columns: 1fr; gap: 6px; }
+    .switchfield { grid-template-columns: 1fr auto; }
   }
 </style>
 </head>
@@ -273,6 +324,7 @@
         <select id="ns"></select>
       </div>
       <button class="btn" id="refresh" title="Rianalizza">↻ Rianalizza</button>
+      <button class="btn" id="opensettings" title="Configura il sistema">⚙ Configura</button>
       <button class="btn primary" id="genreport">✦ Genera report AI</button>
       <div class="health" id="health"><span class="pulse"></span><span id="healthtxt">connessione…</span></div>
     </div>
@@ -317,6 +369,106 @@
       </div>
     </div>
     <div class="mbody"><div class="md" id="reportmd"></div></div>
+  </div>
+</div>
+
+<!-- settings modal -->
+<div class="modal" id="settings">
+  <div class="mbg" id="sbg"></div>
+  <div class="mcard settings-card">
+    <div class="mhead">
+      <div class="mt">Configurazione del sistema</div>
+      <div class="actions">
+        <span class="provtag" id="cfgpath"></span>
+        <button class="close" id="sclose" style="position:static">×</button>
+      </div>
+    </div>
+    <div class="mbody">
+      <form id="cfgform" autocomplete="off" spellcheck="false">
+
+        <div class="sgroup">
+          <h3>Sorgente dati</h3>
+          <p class="sdesc">Da dove l'app legge i pod e le metriche d'uso. L'accesso al cluster resta in sola lettura.</p>
+          <div class="field switchfield">
+            <div><label for="cf_demo_mode">Modalità demo</label>
+              <span class="hint">Dati sintetici incorporati: nessun cluster né Prometheus necessari.</span></div>
+            <label class="switch"><input type="checkbox" id="cf_demo_mode"><span class="track"></span></label>
+          </div>
+          <div class="field switchfield">
+            <div><label for="cf_in_cluster">Esecuzione in-cluster</label>
+              <span class="hint">Usa il ServiceAccount montato. Attivo quando l'app gira dentro Kubernetes.</span></div>
+            <label class="switch"><input type="checkbox" id="cf_in_cluster"><span class="track"></span></label>
+          </div>
+          <div class="field">
+            <label for="cf_kubeconfig">Kubeconfig</label>
+            <input type="text" id="cf_kubeconfig" placeholder="vuoto = ~/.kube/config (solo fuori dal cluster)">
+          </div>
+        </div>
+
+        <div class="sgroup">
+          <h3>Prometheus</h3>
+          <p class="sdesc">Endpoint e finestra temporale da cui ricavare CPU, memoria e throttling reali.</p>
+          <div class="field"><label for="cf_prometheus_url">URL endpoint</label>
+            <input type="text" id="cf_prometheus_url" placeholder="http://prometheus.monitoring.svc:9090"></div>
+          <div class="field"><label for="cf_analysis_window">Finestra di analisi</label>
+            <input type="text" id="cf_analysis_window" placeholder="7d (es. 24h, 3d, 2w)"></div>
+          <div class="field"><label for="cf_prom_timeout">Timeout query (s)</label>
+            <input type="number" id="cf_prom_timeout" min="1" max="600" step="1"></div>
+        </div>
+
+        <div class="sgroup">
+          <h3>Modello AI</h3>
+          <p class="sdesc">Sintetizza in linguaggio naturale i numeri già calcolati. Non inventa metriche.</p>
+          <div class="field"><label for="cf_llm_provider">Provider</label>
+            <select id="cf_llm_provider">
+              <option value="mock">mock — report locale, nessuna chiamata esterna</option>
+              <option value="ollama">ollama — modello locale, dati in-house</option>
+              <option value="anthropic">anthropic — Claude</option>
+              <option value="openai">openai</option>
+            </select></div>
+          <div class="field"><label for="cf_report_language">Lingua del report</label>
+            <input type="text" id="cf_report_language" placeholder="it"></div>
+
+          <div class="prov prov-anthropic">
+            <div class="field"><label for="cf_anthropic_model">Modello Claude</label>
+              <input type="text" id="cf_anthropic_model" placeholder="claude-sonnet-4-6"></div>
+            <div class="field"><label for="cf_anthropic_api_key">API key</label>
+              <input type="password" id="cf_anthropic_api_key" placeholder="non configurata"></div>
+          </div>
+          <div class="prov prov-openai">
+            <div class="field"><label for="cf_openai_model">Modello OpenAI</label>
+              <input type="text" id="cf_openai_model" placeholder="gpt-4o-mini"></div>
+            <div class="field"><label for="cf_openai_api_key">API key</label>
+              <input type="password" id="cf_openai_api_key" placeholder="non configurata"></div>
+          </div>
+          <div class="prov prov-ollama">
+            <div class="field"><label for="cf_ollama_host">Host Ollama</label>
+              <input type="text" id="cf_ollama_host" placeholder="http://localhost:11434"></div>
+            <div class="field"><label for="cf_ollama_model">Modello Ollama</label>
+              <input type="text" id="cf_ollama_model" placeholder="llama3.1"></div>
+          </div>
+
+          <div class="testrow">
+            <button type="button" class="btn" id="cf_testllm">Test connessione</button>
+            <span class="test-result" id="cf_testresult"></span>
+          </div>
+        </div>
+
+        <div class="sgroup">
+          <h3>Parametri di ottimizzazione</h3>
+          <p class="sdesc">Le soglie deterministiche usate dall'analizzatore per right-sizing, rischio OOM e throttling.</p>
+          <div id="cf_thresholds"></div>
+        </div>
+
+      </form>
+    </div>
+    <div class="sfoot">
+      <span class="sfoot-msg" id="cf_msg"></span>
+      <div class="sfoot-btns">
+        <button type="button" class="btn" id="cf_reset">Ripristina default</button>
+        <button type="button" class="btn primary" id="cf_save">Salva e rianalizza</button>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -644,6 +796,190 @@
     URL.revokeObjectURL(url);
   }
 
+  // ---- settings / configuration ----
+  const BOOL_FIELDS = ["demo_mode", "in_cluster"];
+  const STR_FIELDS = ["kubeconfig", "prometheus_url", "analysis_window", "report_language",
+    "anthropic_model", "openai_model", "ollama_host", "ollama_model"];
+  const NUM_FIELDS = ["prom_timeout"];
+  const SECRET_FIELDS = ["anthropic_api_key", "openai_api_key"];
+  const THRESHOLDS = [
+    { key: "overprov_ratio", label: "Soglia sovradimensionamento", min: 0.1, max: 0.9, step: 0.05,
+      fmt: (v) => Math.round(v * 100) + "%",
+      hint: "Sotto questa percentuale d'uso (p95 / richiesta) il container è considerato sovradimensionato." },
+    { key: "request_buffer", label: "Buffer sulla richiesta", min: 1, max: 3, step: 0.05,
+      fmt: (v) => "×" + v.toFixed(2),
+      hint: "Margine applicato sopra l'uso p95 osservato per calcolare la richiesta consigliata." },
+    { key: "limit_buffer", label: "Buffer sul limite", min: 1, max: 3, step: 0.05,
+      fmt: (v) => "×" + v.toFixed(2),
+      hint: "Margine applicato sopra il picco osservato per calcolare il limite consigliato." },
+    { key: "risk_ratio", label: "Soglia rischio OOM", min: 0.5, max: 1, step: 0.01,
+      fmt: (v) => Math.round(v * 100) + "%",
+      hint: "Sopra questa percentuale del limite (picco) si segnala rischio OOM / under-provisioning." },
+    { key: "throttle_ratio", label: "Soglia throttling CPU", min: 0.05, max: 0.9, step: 0.05,
+      fmt: (v) => Math.round(v * 100) + "%",
+      hint: "Se la CPU è in throttling oltre questa frazione del tempo, viene segnalata." },
+    { key: "idle_cpu_cores", label: "Soglia inattività CPU", min: 0, max: 0.1, step: 0.005,
+      fmt: (v) => Math.round(v * 1000) + "m",
+      hint: "Sotto questo uso CPU (p95) e con memoria quasi nulla, il pod è considerato inattivo." },
+  ];
+  let cfgAvailable = false;
+
+  function buildThresholds(cfg) {
+    const wrap = $("#cf_thresholds"); wrap.innerHTML = "";
+    THRESHOLDS.forEach((t) => {
+      const v = cfg[t.key] != null ? cfg[t.key] : t.min;
+      const f = el("div", "rangefield");
+      f.innerHTML =
+        "<div class='rtop'><span class='rname'>" + t.label + "</span>" +
+        "<span class='rval' id='rv_" + t.key + "'>" + t.fmt(v) + "</span></div>" +
+        "<input type='range' id='cf_" + t.key + "' min='" + t.min + "' max='" + t.max +
+        "' step='" + t.step + "' value='" + v + "'>" +
+        "<div class='rhint'>" + t.hint + "</div>";
+      wrap.appendChild(f);
+      const input = f.querySelector("input");
+      input.addEventListener("input", () => { $("#rv_" + t.key).textContent = t.fmt(parseFloat(input.value)); });
+    });
+  }
+
+  function applyProvVisibility() {
+    const p = $("#cf_llm_provider").value;
+    ["anthropic", "openai", "ollama"].forEach((name) => {
+      $(".prov-" + name).classList.toggle("on", p === name);
+    });
+  }
+
+  function setCfgMsg(text, cls) { const m = $("#cf_msg"); m.textContent = text || ""; m.className = "sfoot-msg" + (cls ? " " + cls : ""); }
+
+  function fillSettings(cfg) {
+    BOOL_FIELDS.forEach((k) => $("#cf_" + k).checked = !!cfg[k]);
+    STR_FIELDS.forEach((k) => $("#cf_" + k).value = cfg[k] != null ? cfg[k] : "");
+    NUM_FIELDS.forEach((k) => $("#cf_" + k).value = cfg[k] != null ? cfg[k] : "");
+    $("#cf_llm_provider").value = cfg.llm_provider || "mock";
+    SECRET_FIELDS.forEach((k) => {
+      const inp = $("#cf_" + k); inp.value = "";
+      inp.placeholder = cfg[k + "_set"] ? "•••••••• configurata — lascia vuoto per non cambiarla" : "non configurata";
+    });
+    buildThresholds(cfg);
+    applyProvVisibility();
+    $("#cfgpath").textContent = cfg.config_path ? (cfg.config_persisted ? "persistita" : "non ancora salvata") : "";
+  }
+
+  function collectConfig() {
+    const out = {};
+    BOOL_FIELDS.forEach((k) => out[k] = $("#cf_" + k).checked);
+    STR_FIELDS.forEach((k) => out[k] = $("#cf_" + k).value.trim());
+    NUM_FIELDS.forEach((k) => out[k] = parseFloat($("#cf_" + k).value));
+    out.llm_provider = $("#cf_llm_provider").value;
+    SECRET_FIELDS.forEach((k) => { const v = $("#cf_" + k).value.trim(); if (v) out[k] = v; });
+    THRESHOLDS.forEach((t) => out[t.key] = parseFloat($("#cf_" + t.key).value));
+    return out;
+  }
+
+  function clearBadFields() { document.querySelectorAll("#cfgform .bad").forEach((e) => e.classList.remove("bad")); }
+
+  async function putConfig(body) {
+    const r = await fetch("/api/config", {
+      method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const det = data.detail || {};
+      if (det && det.errors) {
+        clearBadFields();
+        Object.keys(det.errors).forEach((k) => { const f = $("#cf_" + k); if (f) f.classList.add("bad"); });
+        throw new Error(Object.values(det.errors).join(" · "));
+      }
+      throw new Error(typeof det === "string" ? det : (det.message || ("HTTP " + r.status)));
+    }
+    clearBadFields();
+    return data;
+  }
+
+  async function openSettings() {
+    setCfgMsg(""); $("#cf_testresult").textContent = "";
+    $("#settings").classList.add("open");
+    try {
+      const cfg = await api("/api/config");
+      cfgAvailable = true;
+      fillSettings(cfg);
+      ["cf_save", "cf_testllm", "cf_reset"].forEach((id) => $("#" + id).disabled = false);
+    } catch (e) {
+      cfgAvailable = false;
+      setCfgMsg("La configurazione richiede il backend in esecuzione (la demo statica non è modificabile).", "err");
+      ["cf_save", "cf_testllm", "cf_reset"].forEach((id) => $("#" + id).disabled = true);
+    }
+  }
+  function closeSettings() { $("#settings").classList.remove("open"); }
+
+  async function saveSettings() {
+    if (!cfgAvailable) return;
+    const btn = $("#cf_save"), orig = btn.textContent;
+    btn.disabled = true; btn.textContent = "Salvataggio…"; setCfgMsg("");
+    try {
+      await putConfig(collectConfig());
+      closeSettings();
+      await refreshAll();
+      toast("Configurazione salvata · analisi aggiornata");
+    } catch (e) { setCfgMsg(e.message, "err"); }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  }
+
+  async function testLlm() {
+    if (!cfgAvailable) return;
+    const btn = $("#cf_testllm"), orig = btn.textContent;
+    btn.disabled = true; btn.textContent = "Test…";
+    const out = $("#cf_testresult"); out.className = "test-result"; out.textContent = "verifica in corso…";
+    try {
+      await putConfig(collectConfig());                 // apply current form, then test
+      const res = await api("/api/config/test-llm", { method: "POST" });
+      if (res.ok) {
+        out.className = "test-result ok";
+        out.textContent = "✓ " + (res.detail || "Connessione riuscita") + (res.model ? " (" + res.model + ")" : "");
+      } else {
+        out.className = "test-result err";
+        out.textContent = "✗ " + (res.error || "Test fallito");
+      }
+    } catch (e) { out.className = "test-result err"; out.textContent = "✗ " + e.message; }
+    finally { btn.disabled = false; btn.textContent = orig; }
+  }
+
+  async function resetSettings() {
+    if (!cfgAvailable) return;
+    if (!confirm("Ripristinare la configurazione ai valori di default (variabili d'ambiente)?")) return;
+    try {
+      const cfg = await api("/api/config/reset", { method: "POST" });
+      fillSettings(cfg);
+      setCfgMsg("Default ripristinati — premi «Salva e rianalizza» per applicarli.", "ok");
+    } catch (e) { setCfgMsg(e.message, "err"); }
+  }
+
+  let toastTimer = null;
+  function toast(msg) {
+    let t = $("#toast");
+    if (!t) { t = el("div", "toast"); t.id = "toast"; document.body.appendChild(t); }
+    t.textContent = msg; t.classList.add("show");
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove("show"), 2600);
+  }
+
+  function renderHealthBadge() {
+    const h = $("#health"), txt = $("#healthtxt");
+    h.classList.toggle("demo", !state.live);
+    txt.textContent = (state.live ? "Live · " : "Demo · ") + ((state.health && state.health.llm_provider) || "mock");
+  }
+
+  // reload health + namespaces + analysis (used after a config change)
+  async function refreshAll() {
+    await loadHealth();
+    renderHealthBadge();
+    const namespaces = await loadNamespaces();
+    const sel = $("#ns"), prev = state.ns;
+    sel.innerHTML = "";
+    namespaces.forEach((n) => { const o = el("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+    const target = namespaces.includes(prev) ? prev : namespaces[0];
+    if (target) { sel.value = target; await selectNamespace(target); }
+    else $("#tablewrap").innerHTML = "<div class='state'>Nessun namespace disponibile.</div>";
+  }
+
   // ---- orchestration ----
   async function selectNamespace(ns) {
     state.ns = ns; state.selected = null;
@@ -658,9 +994,7 @@
 
   async function init() {
     await loadHealth();
-    const h = $("#health"), txt = $("#healthtxt");
-    if (state.live) { txt.textContent = "Live · " + (state.health.llm_provider || "—"); }
-    else { h.classList.add("demo"); txt.textContent = "Demo · " + (state.health.llm_provider || "mock"); }
+    renderHealthBadge();
 
     const namespaces = await loadNamespaces();
     const sel = $("#ns"); sel.innerHTML = "";
@@ -680,7 +1014,19 @@
   $("#mbg").onclick = () => $("#modal").classList.remove("open");
   $("#dlreport").onclick = downloadReport;
   $("#search").addEventListener("input", (e) => { state.search = e.target.value; renderTable(); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); $("#modal").classList.remove("open"); } });
+
+  // settings
+  $("#opensettings").onclick = openSettings;
+  $("#sclose").onclick = closeSettings;
+  $("#sbg").onclick = closeSettings;
+  $("#cf_llm_provider").addEventListener("change", applyProvVisibility);
+  $("#cf_save").onclick = saveSettings;
+  $("#cf_testllm").onclick = testLlm;
+  $("#cf_reset").onclick = resetSettings;
+
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { closeDrawer(); $("#modal").classList.remove("open"); closeSettings(); }
+  });
 
   init();
 })();

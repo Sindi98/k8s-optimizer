@@ -14,12 +14,13 @@ import logging
 from functools import lru_cache
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import Body, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from . import config
 from .config import settings
 from . import analyzer, demo, llm
 
@@ -46,6 +47,17 @@ def _k8s():
 def _prom():
     from .prometheus import PrometheusClient
     return PrometheusClient()
+
+
+def _invalidate_clients() -> None:
+    """Drop cached cluster/Prometheus clients so the next call re-reads config."""
+    _k8s.cache_clear()
+    _prom.cache_clear()
+
+
+# Rebuild the cached clients whenever the runtime config changes (e.g. the user
+# points the app at a different Prometheus or toggles in-cluster mode).
+config.register_on_change(_invalidate_clients)
 
 
 def _collect(namespace: str):
@@ -107,6 +119,38 @@ def report(req: ReportRequest):
         log.exception("Analysis failed before report")
         raise HTTPException(status_code=502, detail=f"Analisi fallita: {exc}")
     return JSONResponse(llm.generate_report(result))
+
+
+# --- configuration (editable from the UI) -----------------------------------
+@app.get("/api/config")
+def get_config():
+    """Current effective configuration (secrets reported only as a flag)."""
+    return config.public_dict()
+
+
+@app.put("/api/config")
+def put_config(payload: dict = Body(...)):
+    """Apply a partial configuration update from the UI and persist it."""
+    try:
+        return config.update(payload)
+    except config.ConfigError as exc:
+        # field-level validation errors so the UI can highlight the bad inputs
+        raise HTTPException(status_code=400, detail={"message": "Configurazione non valida", "errors": exc.errors})
+    except Exception as exc:  # noqa: BLE001
+        log.exception("Config update failed")
+        raise HTTPException(status_code=500, detail=f"Aggiornamento configurazione fallito: {exc}")
+
+
+@app.post("/api/config/reset")
+def reset_config():
+    """Drop runtime overrides and revert to the environment defaults."""
+    return config.reset()
+
+
+@app.post("/api/config/test-llm")
+def test_llm():
+    """Validate the currently configured LLM provider (credentials/host)."""
+    return llm.test_provider()
 
 
 # --- frontend ---------------------------------------------------------------
