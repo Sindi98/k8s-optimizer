@@ -229,7 +229,8 @@ kube-optimizer/
 │   ├── deploy.yaml              # deploy in-cluster generico (+ PVC config)
 │   ├── demo-docker-desktop.yaml # demo live su Docker Desktop
 │   ├── prometheus-demo.yaml     # Prometheus minimale (cAdvisor) per la demo
-│   └── demo-workloads.yaml      # workload di esempio (namespace demo-apps)
+│   ├── demo-workloads.yaml      # workload di esempio (namespace demo-apps)
+│   └── ollama.yaml              # Ollama in-cluster + pull del modello (LLM locale)
 ├── scripts/
 │   ├── demo-deploy.sh      # demo end-to-end (registry+build+push+deploy)
 │   └── local-registry.sh   # registry locale host.docker.internal:5050

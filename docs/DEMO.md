@@ -297,6 +297,19 @@ Tutti i provider sono già inclusi nell'immagine e selezionabili da **⚙ Config
 
   > Se esegui il backend in locale (`make run-local`, non nel cluster), usa invece
   > **Host Ollama** = `http://localhost:11434`.
+
+  **Alternativa: Ollama dentro il cluster** (nessun Ollama sull'host). Installa
+  Ollama come pod e scarica il modello con il manifest dedicato:
+  ```bash
+  kubectl apply -f k8s/ollama.yaml            # oppure: make ollama
+  kubectl -n ollama rollout status deploy/ollama
+  kubectl -n ollama logs job/ollama-pull -f   # avanzamento del download del modello
+  ```
+  Poi nella UI: **Host Ollama** = `http://ollama.ollama.svc:11434`, **Modello
+  Ollama** = `gemma4` (lo stesso scaricato dal Job). Se `gemma4` non è nel registry
+  Ollama, cambia `MODEL` nel Job (es. `gemma3:1b`, `gemma2:2b`, `qwen2.5:3b`) — vedi
+  <https://ollama.com/library>. L'inferenza gira su CPU: assegna a Docker Desktop
+  ≥ 8 GB di RAM (Settings → Resources) e preferisci un modello piccolo.
 - **Claude (anthropic)**: provider `anthropic`, incolla la `ANTHROPIC_API_KEY`,
   modello es. `claude-sonnet-4-6`. Richiede rete in uscita verso le API esterne.
 - **OpenAI**: provider `openai`, incolla la `OPENAI_API_KEY`, modello es.
