@@ -12,7 +12,7 @@
 # "host.docker.internal:5050" tra le insecure-registries di Docker Desktop.
 #
 # Uso:    ./scripts/demo-deploy.sh
-# Var:    REGISTRY, TAG, NO_PORT_FORWARD=1, SKIP_REGISTRY=1
+# Var:    REGISTRY, TAG, NO_PORT_FORWARD=1, SKIP_REGISTRY=1, WITH_WORKLOADS=1
 # ──────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 
@@ -46,6 +46,11 @@ echo "▸ [4/5] Reclaim · Kube Optimizer (live, read-only)"
 kubectl apply -f "${ROOT}/k8s/demo-docker-desktop.yaml"
 # Assicura il pull dell'ultima immagine pushata anche se il tag non cambia.
 kubectl -n kube-optimizer rollout restart deploy/kube-optimizer >/dev/null 2>&1 || true
+
+if [[ "${WITH_WORKLOADS:-0}" == "1" ]]; then
+  echo "▸ Workload di esempio (namespace demo-apps)"
+  kubectl apply -f "${ROOT}/k8s/demo-workloads.yaml"
+fi
 
 echo "▸ Attendo i rollout…"
 kubectl -n monitoring rollout status deploy/prometheus --timeout=180s
