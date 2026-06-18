@@ -204,6 +204,7 @@ configurazione (`/data`) e il Service.
 | GET  | `/api/config` | configurazione effettiva (segreti mascherati) |
 | PUT  | `/api/config` | aggiorna e persiste la configurazione |
 | POST | `/api/config/test-llm` | verifica il provider LLM configurato |
+| GET  | `/api/config/ollama-models` | elenca i modelli installati sull'host Ollama |
 | POST | `/api/config/reset` | ripristina i default da variabili d'ambiente |
 
 ## Struttura
@@ -260,9 +261,64 @@ La pipeline **GitHub Actions** (`.github/workflows/ci.yml`) gira a ogni push su
 - **Frontend** — compile-check della dashboard JS.
 - **Image** — build dell'immagine container (senza push).
 
-## Soglie (tutte configurabili)
+## Riferimento completo delle impostazioni
 
-Default sensati in `config.py`, sovrascrivibili via env: sovradimensionamento
-sotto il 50% di utilizzo (`OVERPROV_RATIO`), buffer +20% sulla richiesta e +50%
-sul limite (`REQUEST_BUFFER`/`LIMIT_BUFFER`), rischio sopra il 90% del limite
-(`RISK_RATIO`), throttling oltre il 25% (`THROTTLE_RATIO`).
+Ogni impostazione si può cambiare **da GUI** (pannello «⚙ Configura») oppure come
+**variabile d'ambiente** (default di avvio). Gli override fatti da GUI hanno la
+precedenza e vengono persistiti su `CONFIG_PATH`.
+
+| Sezione GUI | Campo GUI | Variabile d'ambiente | Default | Descrizione |
+|---|---|---|---|---|
+| Sorgente dati | Modalità demo | `DEMO_MODE` | `false` | dati sintetici, nessun cluster né Prometheus |
+| Sorgente dati | Esecuzione in-cluster | `IN_CLUSTER` | `false` | usa il ServiceAccount montato |
+| Sorgente dati | Kubeconfig | `KUBECONFIG` | _(vuoto = `~/.kube/config`)_ | path kubeconfig (solo fuori dal cluster) |
+| Prometheus | URL endpoint | `PROMETHEUS_URL` | `http://localhost:9090` | endpoint Prometheus |
+| Prometheus | Finestra di analisi | `ANALYSIS_WINDOW` | `7d` | finestra PromQL (`24h`, `7d`, `2w`…) |
+| Prometheus | Timeout query (s) | `PROM_TIMEOUT` | `30` | timeout delle query |
+| Modello AI | Provider | `LLM_PROVIDER` | `mock` | `mock` \| `ollama` \| `anthropic` \| `openai` |
+| Modello AI | Lingua del report | `REPORT_LANGUAGE` | `it` | lingua del report generato |
+| Modello AI | API key (Claude) | `ANTHROPIC_API_KEY` | _(vuoto)_ | credenziale Claude (mascherata) |
+| Modello AI | Modello Claude | `ANTHROPIC_MODEL` | `claude-sonnet-4-6` | modello Claude |
+| Modello AI | API key (OpenAI) | `OPENAI_API_KEY` | _(vuoto)_ | credenziale OpenAI (mascherata) |
+| Modello AI | Modello OpenAI | `OPENAI_MODEL` | `gpt-4o-mini` | modello OpenAI |
+| Modello AI | Host Ollama | `OLLAMA_HOST` | `http://localhost:11434` | host Ollama (in-cluster: `http://host.docker.internal:11434`) |
+| Modello AI | Modello Ollama | `OLLAMA_MODEL` | `llama3.1` | modello Ollama (qualsiasi installato, es. `gemma3`) |
+| Parametri | Soglia sovradimensionamento | `OVERPROV_RATIO` | `0.5` | sotto questa % d'uso (p95/richiesta) → sovradimensionato |
+| Parametri | Buffer sulla richiesta | `REQUEST_BUFFER` | `1.2` | margine su p95 per la richiesta consigliata |
+| Parametri | Buffer sul limite | `LIMIT_BUFFER` | `1.5` | margine sul max per il limite consigliato |
+| Parametri | Soglia rischio OOM | `RISK_RATIO` | `0.9` | sopra questa % del limite (max) → rischio OOM |
+| Parametri | Soglia throttling CPU | `THROTTLE_RATIO` | `0.25` | throttling oltre questa frazione → segnalato |
+| Parametri | Soglia inattività CPU | `IDLE_CPU_CORES` | `0.005` | sotto questo uso CPU (core, p95) + mem bassa → inattivo |
+| _(runtime)_ | — | `CONFIG_PATH` | _(file temporaneo)_ | dove la GUI salva gli override |
+
+### Configurare a mano (senza GUI) via API
+
+Le stesse modifiche si possono applicare con `curl` (con il port-forward attivo su `:8080`):
+
+```bash
+# leggere la configurazione effettiva (segreti mascherati)
+curl -s localhost:8080/api/config | python3 -m json.tool
+
+# impostare Ollama (equivalente al pannello "⚙ Configura")
+curl -X PUT localhost:8080/api/config -H 'Content-Type: application/json' -d '{
+  "llm_provider": "ollama",
+  "ollama_host": "http://host.docker.internal:11434",
+  "ollama_model": "llama3.1"
+}'
+
+# regolare le soglie di ottimizzazione
+curl -X PUT localhost:8080/api/config -H 'Content-Type: application/json' \
+  -d '{"overprov_ratio":0.6,"risk_ratio":0.85,"analysis_window":"24h"}'
+
+# verificare il provider LLM e i modelli Ollama installati
+curl -X POST localhost:8080/api/config/test-llm | python3 -m json.tool
+curl -s  localhost:8080/api/config/ollama-models | python3 -m json.tool
+
+# ripristinare i default da variabili d'ambiente
+curl -X POST localhost:8080/api/config/reset
+```
+
+> Nota: il report indica sempre **provider e modello** usati. Se il provider non
+> risponde (es. Ollama non raggiungibile), l'app genera comunque il report con
+> `mock` e lo segnala chiaramente (banner «fallback»), così sai sempre cosa hai
+> letto.
