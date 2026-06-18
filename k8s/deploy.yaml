@@ -1,0 +1,132 @@
+# ──────────────────────────────────────────────────────────────────────────
+# Kube Optimizer — deploy in-cluster
+#
+# RBAC strettamente in sola lettura: l'app NON può modificare nulla nel
+# cluster, legge soltanto pod / namespace per l'analisi. Le raccomandazioni
+# (es. snippet `resources:`) vanno applicate manualmente o via GitOps.
+#
+#   kubectl apply -f k8s/deploy.yaml
+#   kubectl -n kube-optimizer port-forward svc/kube-optimizer 8080:80
+#   # poi apri http://localhost:8080
+# ──────────────────────────────────────────────────────────────────────────
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kube-optimizer
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: kube-optimizer
+  namespace: kube-optimizer
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: kube-optimizer-readonly
+rules:
+  - apiGroups: [""]
+    resources: ["pods", "namespaces", "nodes"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: kube-optimizer-readonly
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: kube-optimizer-readonly
+subjects:
+  - kind: ServiceAccount
+    name: kube-optimizer
+    namespace: kube-optimizer
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kube-optimizer
+  namespace: kube-optimizer
+  labels:
+    app: kube-optimizer
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kube-optimizer
+  template:
+    metadata:
+      labels:
+        app: kube-optimizer
+    spec:
+      serviceAccountName: kube-optimizer
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # Sostituisci con la tua immagine (es. registry interno Quay/Nexus)
+          image: REGISTRY/kube-optimizer:1.0.0
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          env:
+            - name: DEMO_MODE
+              value: "false"
+            - name: IN_CLUSTER
+              value: "true"
+            # Prometheus in-cluster (adatta a service/namespace del tuo stack).
+            # Esempio kube-prometheus-stack:
+            - name: PROMETHEUS_URL
+              value: "http://prometheus-operated.monitoring.svc:9090"
+            - name: ANALYSIS_WINDOW
+              value: "7d"
+            # Provider AI. "mock" non richiede nulla; "ollama" tiene i dati in-house.
+            - name: LLM_PROVIDER
+              value: "mock"
+            - name: REPORT_LANGUAGE
+              value: "it"
+            # Se usi Ollama in-cluster:
+            # - name: OLLAMA_HOST
+            #   value: "http://ollama.ai.svc:11434"
+            # - name: OLLAMA_MODEL
+            #   value: "llama3.1"
+            # Se usi Claude/OpenAI, monta la chiave da un Secret:
+            # - name: ANTHROPIC_API_KEY
+            #   valueFrom:
+            #     secretKeyRef: { name: kube-optimizer-llm, key: anthropic-api-key }
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          resources:
+            requests:
+              cpu: 100m
+              memory: 192Mi
+            limits:
+              cpu: 500m
+              memory: 384Mi
+          readinessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+          livenessProbe:
+            httpGet: { path: /api/health, port: 8080 }
+            initialDelaySeconds: 10
+            periodSeconds: 30
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kube-optimizer
+  namespace: kube-optimizer
+spec:
+  selector:
+    app: kube-optimizer
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080

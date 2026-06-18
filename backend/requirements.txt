@@ -1,0 +1,9 @@
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+httpx==0.28.1
+kubernetes==31.0.0
+pydantic==2.10.4
+
+# Optional LLM providers — install only the one you use.
+# anthropic==0.42.0
+# openai==1.59.0

@@ -1,0 +1,689 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Reclaim · Kubernetes resource optimizer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Manrope:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --ink:        #15110F;
+    --ink-2:      #1C1714;
+    --ink-3:      #241D19;
+    --ink-hover:  #2A221D;
+    --line:       rgba(217, 194, 163, 0.12);
+    --line-soft:  rgba(217, 194, 163, 0.07);
+    --wine:       #B24A57;
+    --wine-deep:  #6B2737;
+    --champagne:  #D9C2A3;
+    --text:       #ECE4DD;
+    --muted:      #9C8F86;
+    --muted-2:    #6F655E;
+    --crit:       #D1564B;
+    --warn:       #CE9248;
+    --ok:         #5FA88B;
+    --info:       #9A93B0;
+    --track:      #2E2620;
+    --shadow:     0 24px 60px -24px rgba(0,0,0,0.7);
+    font-synthesis: none;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    background: var(--ink);
+    color: var(--text);
+    font-family: 'Manrope', system-ui, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    background-image:
+      radial-gradient(900px 500px at 88% -8%, rgba(123,39,55,0.16), transparent 60%),
+      radial-gradient(700px 500px at -5% 105%, rgba(217,194,163,0.05), transparent 55%);
+    background-attachment: fixed;
+  }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; font-feature-settings: "tnum"; }
+
+  /* ---------- shell ---------- */
+  .app { max-width: 1240px; margin: 0 auto; padding: 0 28px 80px; }
+
+  header.top {
+    display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 24px; padding: 30px 0 22px; flex-wrap: wrap;
+    border-bottom: 1px solid var(--line);
+    position: sticky; top: 0; z-index: 30;
+    background: linear-gradient(var(--ink) 72%, rgba(21,17,15,0));
+    backdrop-filter: blur(2px);
+  }
+  .brand { display: flex; align-items: baseline; gap: 14px; }
+  .brand h1 {
+    font-family: 'Fraunces', serif; font-weight: 500; font-size: 34px;
+    letter-spacing: 0.5px; color: var(--text); line-height: 1;
+  }
+  .brand h1 .dot { color: var(--wine); }
+  .brand .tag {
+    font-size: 12px; color: var(--muted); letter-spacing: 0.14em;
+    text-transform: uppercase; padding-bottom: 4px;
+  }
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .ctl { display: flex; flex-direction: column; gap: 5px; }
+  .ctl label {
+    font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted-2);
+  }
+  select, button, input {
+    font-family: inherit; font-size: 13px; color: var(--text);
+  }
+  select, .chip, .btn {
+    background: var(--ink-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: 9px 13px; height: 38px;
+  }
+  select { cursor: pointer; min-width: 168px; appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg width='10' height='6' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239C8F86' fill='none' stroke-width='1.4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 12px center; padding-right: 30px; }
+  select:hover { border-color: rgba(217,194,163,0.24); }
+  .btn { display: inline-flex; align-items: center; gap: 8px; cursor: pointer;
+    transition: background .15s, border-color .15s, color .15s; white-space: nowrap; }
+  .btn:hover { background: var(--ink-hover); border-color: rgba(217,194,163,0.22); }
+  .btn.primary { background: var(--wine-deep); border-color: transparent; color: #FBEFEF; font-weight: 600; }
+  .btn.primary:hover { background: #7d2f3e; }
+  .btn[disabled] { opacity: .5; cursor: not-allowed; }
+
+  .health { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted);
+    padding: 0 4px; height: 38px; }
+  .health .pulse { width: 7px; height: 7px; border-radius: 50%; background: var(--ok);
+    box-shadow: 0 0 0 0 rgba(95,168,139,.5); animation: pulse 2.4s infinite; }
+  .health.demo .pulse { background: var(--champagne); }
+  @keyframes pulse { 0%{box-shadow:0 0 0 0 rgba(95,168,139,.45)} 70%{box-shadow:0 0 0 7px rgba(95,168,139,0)} 100%{box-shadow:0 0 0 0 rgba(95,168,139,0)} }
+
+  /* ---------- summary ---------- */
+  .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin: 26px 0 22px; }
+  .card { background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px;
+    padding: 18px 20px 17px; position: relative; overflow: hidden; }
+  .card .klabel { font-size: 11px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); margin-bottom: 12px; }
+  .card .kval { font-family: 'Fraunces', serif; font-weight: 500; font-size: 38px; line-height: 1; }
+  .card .ksub { font-size: 12px; color: var(--muted); margin-top: 9px; }
+  .card.hero .kval { color: var(--wine); }
+  .card.hero::after { content:""; position:absolute; right:-30px; bottom:-30px; width:120px; height:120px;
+    border-radius:50%; background: radial-gradient(circle, rgba(178,74,87,0.12), transparent 70%); }
+  .card .kval .unit { font-size: 18px; color: var(--muted); font-family:'JetBrains Mono',monospace; margin-left: 3px; }
+  .pill-row { display: flex; gap: 6px; margin-top: 11px; flex-wrap: wrap; }
+  .pill { font-size: 11px; padding: 3px 9px; border-radius: 20px; border: 1px solid var(--line);
+    display: inline-flex; align-items: center; gap: 6px; }
+  .pill .d { width: 6px; height: 6px; border-radius: 50%; }
+  .d.crit{background:var(--crit)} .d.warn{background:var(--warn)} .d.ok{background:var(--ok)} .d.info{background:var(--info)}
+
+  /* ---------- toolbar ---------- */
+  .toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    margin-bottom: 12px; flex-wrap: wrap; }
+  .segmented { display: inline-flex; background: var(--ink-2); border: 1px solid var(--line);
+    border-radius: 9px; padding: 3px; }
+  .segmented button { background: transparent; border: none; color: var(--muted);
+    padding: 6px 13px; border-radius: 6px; cursor: pointer; font-size: 12.5px; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 7px; }
+  .segmented button.on { background: var(--ink-hover); color: var(--text); }
+  .segmented button .count { color: var(--muted-2); font-family:'JetBrains Mono',monospace; font-size: 11px; }
+  .search { position: relative; }
+  .search input { background: var(--ink-2); border: 1px solid var(--line); border-radius: 9px;
+    height: 38px; padding: 0 13px 0 34px; width: 230px; }
+  .search input::placeholder { color: var(--muted-2); }
+  .search svg { position: absolute; left: 11px; top: 11px; }
+
+  /* ---------- table ---------- */
+  .panel { background: var(--ink-2); border: 1px solid var(--line); border-radius: 14px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th { text-align: left; font-size: 10.5px; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted-2); font-weight: 600; padding: 13px 16px; border-bottom: 1px solid var(--line);
+    background: rgba(0,0,0,0.12); }
+  thead th.num { text-align: right; }
+  tbody tr { border-bottom: 1px solid var(--line-soft); cursor: pointer; transition: background .12s; }
+  tbody tr:last-child { border-bottom: none; }
+  tbody tr:hover { background: var(--ink-3); }
+  tbody tr.sel { background: var(--ink-3); box-shadow: inset 3px 0 0 var(--wine); }
+  td { padding: 13px 16px; vertical-align: middle; }
+  td.num { text-align: right; }
+  .sevcell { width: 30px; padding-left: 18px; }
+  .sevdot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; }
+  .sevdot.crit{background:var(--crit); box-shadow:0 0 9px rgba(209,86,75,.5)}
+  .sevdot.warn{background:var(--warn)} .sevdot.ok{background:var(--ok)} .sevdot.info{background:var(--info)}
+  .podname { font-weight: 600; font-size: 13.5px; }
+  .podmeta { font-size: 11.5px; color: var(--muted); margin-top: 2px; }
+  .qos { font-family:'JetBrains Mono',monospace; font-size: 10.5px; padding: 1px 6px; border-radius: 4px;
+    border: 1px solid var(--line); color: var(--muted); }
+
+  /* request-vs-reality bar (the signature element) */
+  .rvr { width: 168px; }
+  .rvr .nums { display: flex; justify-content: space-between; font-family:'JetBrains Mono',monospace;
+    font-size: 11px; margin-bottom: 5px; }
+  .rvr .nums .used { color: var(--text); }
+  .rvr .nums .req { color: var(--muted-2); }
+  .bar { position: relative; height: 8px; background: var(--track); border-radius: 5px; overflow: visible; }
+  .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 5px; }
+  .bar .fill.ok   { background: linear-gradient(90deg, #4d9479, var(--ok)); }
+  .bar .fill.warn { background: linear-gradient(90deg, #b07d3c, var(--warn)); }
+  .bar .fill.crit { background: linear-gradient(90deg, #b8443a, var(--crit)); }
+  .bar .reqtick { position: absolute; top: -3px; bottom: -3px; width: 2px; background: var(--champagne);
+    border-radius: 2px; opacity: .85; }
+  .bar .reqtick::after { content:""; }
+  .throttle { font-family:'JetBrains Mono',monospace; font-size: 12px; }
+  .throttle.bad { color: var(--crit); font-weight: 600; }
+  .badge-oom { font-size: 10px; color: var(--crit); border: 1px solid rgba(209,86,75,.4);
+    padding: 1px 6px; border-radius: 4px; }
+  .reclaim { font-family:'JetBrains Mono',monospace; font-size: 12.5px; color: var(--champagne); }
+  .reclaim.zero { color: var(--muted-2); }
+  .chev { color: var(--muted-2); }
+
+  /* ---------- drawer ---------- */
+  .scrim { position: fixed; inset: 0; background: rgba(8,6,5,0.55); opacity: 0; pointer-events: none;
+    transition: opacity .2s; z-index: 40; backdrop-filter: blur(1px); }
+  .scrim.open { opacity: 1; pointer-events: auto; }
+  .drawer { position: fixed; top: 0; right: 0; height: 100%; width: 520px; max-width: 94vw;
+    background: var(--ink-2); border-left: 1px solid var(--line); box-shadow: var(--shadow);
+    transform: translateX(100%); transition: transform .26s cubic-bezier(.2,.7,.2,1); z-index: 50;
+    display: flex; flex-direction: column; }
+  .drawer.open { transform: translateX(0); }
+  .drawer .dhead { padding: 22px 24px 18px; border-bottom: 1px solid var(--line); position: relative; }
+  .drawer .dhead h2 { font-family:'JetBrains Mono',monospace; font-weight: 600; font-size: 16px; word-break: break-all; }
+  .drawer .dhead .dsub { color: var(--muted); font-size: 12.5px; margin-top: 7px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .close { position: absolute; top: 18px; right: 18px; background: var(--ink-3); border: 1px solid var(--line);
+    width: 30px; height: 30px; border-radius: 8px; color: var(--muted); cursor: pointer; font-size: 16px; }
+  .close:hover { color: var(--text); background: var(--ink-hover); }
+  .dbody { overflow-y: auto; padding: 20px 24px 30px; flex: 1; }
+  .cblock { border: 1px solid var(--line); border-radius: 12px; padding: 16px; margin-bottom: 16px; background: rgba(0,0,0,0.1); }
+  .cblock h3 { font-family:'JetBrains Mono',monospace; font-size: 13.5px; margin-bottom: 12px; display:flex; align-items:center; gap:8px;}
+  .issue { display: flex; gap: 10px; padding: 9px 0; border-top: 1px solid var(--line-soft); font-size: 13px; }
+  .issue:first-of-type { border-top: none; }
+  .issue .ic { flex: 0 0 auto; width: 7px; height: 7px; border-radius: 50%; margin-top: 7px; }
+  .issue .it { font-weight: 600; }
+  .issue .id { color: var(--muted); }
+  .recgrid { display: grid; grid-template-columns: auto 1fr 1fr; gap: 7px 14px; margin: 14px 0 4px;
+    font-family:'JetBrains Mono',monospace; font-size: 12px; align-items: baseline; }
+  .recgrid .rh { color: var(--muted-2); font-size: 10px; letter-spacing: .1em; text-transform: uppercase; }
+  .recgrid .cur { color: var(--muted); }
+  .recgrid .arrow { color: var(--wine); }
+  .recgrid .new { color: var(--ok); }
+  pre.yaml { background: #100C0A; border: 1px solid var(--line); border-radius: 9px; padding: 13px 14px;
+    font-family:'JetBrains Mono',monospace; font-size: 12px; color: #d8cfc6; overflow-x: auto; margin-top: 12px;
+    position: relative; line-height: 1.55; }
+  pre.yaml .k { color: var(--champagne); } pre.yaml .v { color: #9ec7b3; } pre.yaml .c { color: var(--muted-2); }
+  .copy { position: absolute; top: 9px; right: 9px; background: var(--ink-3); border: 1px solid var(--line);
+    color: var(--muted); border-radius: 6px; padding: 3px 8px; font-size: 10.5px; cursor: pointer; font-family:'Manrope';}
+  .copy:hover { color: var(--text); }
+  .ok-empty { color: var(--ok); font-size: 13px; }
+
+  /* ---------- report modal ---------- */
+  .modal { position: fixed; inset: 0; display: none; align-items: center; justify-content: center;
+    z-index: 60; padding: 30px; }
+  .modal.open { display: flex; }
+  .modal .mbg { position: absolute; inset: 0; background: rgba(8,6,5,0.62); backdrop-filter: blur(2px); }
+  .mcard { position: relative; background: var(--ink-2); border: 1px solid var(--line); border-radius: 16px;
+    width: 760px; max-width: 100%; max-height: 86vh; display: flex; flex-direction: column; box-shadow: var(--shadow); }
+  .mcard .mhead { padding: 20px 24px; border-bottom: 1px solid var(--line); display: flex;
+    align-items: center; justify-content: space-between; }
+  .mcard .mhead .mt { font-family:'Fraunces',serif; font-size: 20px; font-weight: 500; }
+  .mcard .mhead .actions { display:flex; gap: 10px; align-items:center; }
+  .provtag { font-size: 11px; color: var(--muted); font-family:'JetBrains Mono',monospace;
+    border:1px solid var(--line); padding: 3px 8px; border-radius: 6px; }
+  .mbody { overflow-y: auto; padding: 8px 28px 28px; }
+
+  /* rendered markdown */
+  .md h1 { font-family:'Fraunces',serif; font-weight:500; font-size: 24px; margin: 22px 0 10px; }
+  .md h2 { font-family:'Fraunces',serif; font-weight:500; font-size: 19px; margin: 24px 0 8px; color: var(--text); }
+  .md h3 { font-family:'JetBrains Mono',monospace; font-size: 14px; margin: 18px 0 6px; color: var(--champagne); }
+  .md p { margin: 8px 0; color: #ddd4cc; }
+  .md ul { margin: 8px 0 8px 4px; list-style: none; }
+  .md li { padding: 3px 0 3px 18px; position: relative; color: #ddd4cc; }
+  .md li::before { content:"–"; position:absolute; left:2px; color: var(--wine); }
+  .md strong { color: var(--text); font-weight: 700; }
+  .md code { font-family:'JetBrains Mono',monospace; font-size: 12.5px; background: var(--ink-3);
+    padding: 1px 5px; border-radius: 4px; color: var(--champagne); }
+  .md blockquote { border-left: 2px solid var(--warn); padding: 4px 14px; margin: 10px 0; color: var(--muted);
+    background: rgba(206,146,72,0.06); border-radius: 0 8px 8px 0; }
+  .md pre { background:#100C0A; border:1px solid var(--line); border-radius:9px; padding:13px 14px;
+    overflow-x:auto; margin: 10px 0; }
+  .md pre code { background: none; padding: 0; color: #d8cfc6; line-height: 1.55; }
+  .md em { color: var(--muted); font-style: italic; }
+
+  /* ---------- states ---------- */
+  .state { padding: 70px 20px; text-align: center; color: var(--muted); }
+  .state .spin { width: 26px; height: 26px; border: 2.5px solid var(--line); border-top-color: var(--wine);
+    border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 16px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .err { color: var(--crit); }
+
+  @media (max-width: 860px) {
+    .summary { grid-template-columns: repeat(2, 1fr); }
+    .rvr { width: 120px; }
+    thead th.hide, td.hide { display: none; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="top">
+    <div class="brand">
+      <h1>Reclaim<span class="dot">.</span></h1>
+      <span class="tag">Kubernetes resource optimizer</span>
+    </div>
+    <div class="controls">
+      <div class="ctl">
+        <label for="ns">Namespace</label>
+        <select id="ns"></select>
+      </div>
+      <button class="btn" id="refresh" title="Rianalizza">↻ Rianalizza</button>
+      <button class="btn primary" id="genreport">✦ Genera report AI</button>
+      <div class="health" id="health"><span class="pulse"></span><span id="healthtxt">connessione…</span></div>
+    </div>
+  </header>
+
+  <section class="summary" id="summary"></section>
+
+  <div class="toolbar">
+    <div class="segmented" id="filters"></div>
+    <div class="search">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><circle cx="6" cy="6" r="4.4" stroke="#6F655E" stroke-width="1.4"/><path d="M9.5 9.5L12.5 12.5" stroke="#6F655E" stroke-width="1.4" stroke-linecap="round"/></svg>
+      <input id="search" placeholder="Filtra pod…" />
+    </div>
+  </div>
+
+  <div class="panel" id="tablewrap">
+    <div class="state"><div class="spin"></div>Analisi in corso…</div>
+  </div>
+</div>
+
+<!-- drawer -->
+<div class="scrim" id="scrim"></div>
+<aside class="drawer" id="drawer">
+  <div class="dhead">
+    <button class="close" id="dclose">×</button>
+    <h2 id="dtitle"></h2>
+    <div class="dsub" id="dsub"></div>
+  </div>
+  <div class="dbody" id="dbody"></div>
+</aside>
+
+<!-- report modal -->
+<div class="modal" id="modal">
+  <div class="mbg" id="mbg"></div>
+  <div class="mcard">
+    <div class="mhead">
+      <div class="mt">Report di ottimizzazione</div>
+      <div class="actions">
+        <span class="provtag" id="provtag"></span>
+        <button class="btn" id="dlreport">↓ .md</button>
+        <button class="close" id="mclose" style="position:static">×</button>
+      </div>
+    </div>
+    <div class="mbody"><div class="md" id="reportmd"></div></div>
+  </div>
+</div>
+
+<script>window.BUNDLED_DEMO = {"health":{"demo_mode":true,"llm_provider":"mock","analysis_window":"7d"},"namespaces":["mercury-prod","mercury-staging","platform"],"analyses":{"mercury-prod":{"namespace":"mercury-prod","window":"7d","generated_at":"2026-06-17T15:40:22+00:00","summary":{"pods_total":6,"reclaimable_cpu_cores":2.08,"reclaimable_cpu_label":"2.08","reclaimable_mem_bytes":2986344448.0,"reclaimable_mem_label":"2.78Gi","requested_cpu_cores":4.25,"requested_mem_bytes":8053063680,"cpu_savings_pct":48.9,"mem_savings_pct":37.1,"counts":{"critical":2,"warning":3,"info":0,"ok":1}},"pods":[{"name":"credit-recovery-5f7b9d-h8m2p","namespace":"mercury-prod","node":"node-2","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"credit-recovery","qos_class":"Burstable","spec":{"cpu_request":0.25,"cpu_limit":0.5,"mem_request":536870912,"mem_limit":805306368,"cpu_request_label":"250m","cpu_limit_label":"500m","mem_request_label":"512Mi","mem_limit_label":"768Mi"},"usage":{"cpu_avg":0.42,"cpu_p95":0.49,"cpu_max":0.5,"mem_avg":440401920,"mem_p95":503316480,"mem_max":534773760,"cpu_throttle":0.61,"cpu_p95_label":"490m","cpu_max_label":"500m","mem_p95_label":"480Mi","mem_max_label":"510Mi","cpu_use_ratio":1.96,"mem_use_ratio":0.9375},"recommendation":{"cpu_request":0.25,"cpu_limit":0.75,"mem_request":536870912,"mem_limit":805306368,"cpu_request_label":"250m","cpu_limit_label":"750m","mem_request_label":"512Mi","mem_limit_label":"768Mi","reclaim_cpu_cores":0.0,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":null,"reclaim_mem_label":null},"issues":[{"kind":"cpu_throttling","severity":"critical","title":"CPU in throttling","detail":"Il container è in throttling il 61% del tempo: il limite CPU (500m) è troppo basso e rallenta l'applicazione."}]}],"reclaimable_cpu":0.0,"reclaimable_mem":0.0,"severity":"critical","reclaimable_cpu_m":0,"reclaimable_mem_mi":0},{"name":"mongodb-0","namespace":"mercury-prod","node":"node-1","qos_class":"Burstable","age_hours":720.0,"restarts":4,"oom_killed":true,"containers":[{"name":"mongodb","qos_class":"Burstable","spec":{"cpu_request":1.0,"cpu_limit":2.0,"mem_request":2147483648,"mem_limit":2147483648,"cpu_request_label":"1","cpu_limit_label":"2","mem_request_label":"2Gi","mem_limit_label":"2Gi"},"usage":{"cpu_avg":0.55,"cpu_p95":0.9,"cpu_max":1.3,"mem_avg":1825361100.8,"mem_p95":2040109465.6,"mem_max":2126008811.52,"cpu_throttle":0.05,"cpu_p95_label":"900m","cpu_max_label":"1.3","mem_p95_label":"1.9Gi","mem_max_label":"1.98Gi","cpu_use_ratio":0.9,"mem_use_ratio":0.95},"recommendation":{"cpu_request":1.0,"cpu_limit":2.0,"mem_request":2147483648,"mem_limit":3187671040,"cpu_request_label":"1","cpu_limit_label":"2","mem_request_label":"2Gi","mem_limit_label":"2.97Gi","reclaim_cpu_cores":0.0,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":null,"reclaim_mem_label":null},"issues":[{"kind":"oom_killed","severity":"critical","title":"OOMKilled in passato","detail":"Il container è già stato terminato per esaurimento memoria: alza la richiesta/limite di memoria."},{"kind":"oom_risk","severity":"critical","title":"Rischio OOM","detail":"Il picco di memoria (1.98Gi) è al 99% del limite (2Gi). Limite consigliato: 2.97Gi."}]}],"reclaimable_cpu":0.0,"reclaimable_mem":0.0,"severity":"critical","reclaimable_cpu_m":0,"reclaimable_mem_mi":0},{"name":"zaam-api-7d9c8b6f4-q2xkz","namespace":"mercury-prod","node":"node-2","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"zaam-api","qos_class":"Burstable","spec":{"cpu_request":2.0,"cpu_limit":4.0,"mem_request":4294967296,"mem_limit":6442450944,"cpu_request_label":"2","cpu_limit_label":"4","mem_request_label":"4Gi","mem_limit_label":"6Gi"},"usage":{"cpu_avg":0.18,"cpu_p95":0.34,"cpu_max":0.62,"mem_avg":1181116006.4,"mem_p95":1503238553.6,"mem_max":1825361100.8,"cpu_throttle":0.0,"cpu_p95_label":"340m","cpu_max_label":"620m","mem_p95_label":"1.4Gi","mem_max_label":"1.7Gi","cpu_use_ratio":0.17,"mem_use_ratio":0.35},"recommendation":{"cpu_request":0.41,"cpu_limit":0.93,"mem_request":1803550720,"mem_limit":6442450944,"cpu_request_label":"410m","cpu_limit_label":"930m","mem_request_label":"1.68Gi","mem_limit_label":"6Gi","reclaim_cpu_cores":1.59,"reclaim_mem_bytes":2491416576,"reclaim_cpu_label":"1.59","reclaim_mem_label":"2.32Gi"},"issues":[{"kind":"over_provisioned_cpu","severity":"warning","title":"CPU sovradimensionata","detail":"Usa 340m al p95 contro una richiesta di 2 (17%). Richiesta consigliata: 410m."},{"kind":"over_provisioned_mem","severity":"warning","title":"Memoria sovradimensionata","detail":"Usa 1.4Gi al p95 contro una richiesta di 4Gi (35%). Richiesta consigliata: 1.68Gi."}]}],"reclaimable_cpu":1.59,"reclaimable_mem":2491416576.0,"severity":"warning","reclaimable_cpu_m":1590,"reclaimable_mem_mi":2376},{"name":"zaam-frontend-6c4d8f-7tq9w","namespace":"mercury-prod","node":"node-3","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"nginx","qos_class":"Burstable","spec":{"cpu_request":0.5,"cpu_limit":1.0,"mem_request":536870912,"mem_limit":536870912,"cpu_request_label":"500m","cpu_limit_label":"1","mem_request_label":"512Mi","mem_limit_label":"512Mi"},"usage":{"cpu_avg":0.004,"cpu_p95":0.008,"cpu_max":0.03,"mem_avg":29360128,"mem_p95":35651584,"mem_max":50331648,"cpu_throttle":0.0,"cpu_p95_label":"8m","cpu_max_label":"30m","mem_p95_label":"34Mi","mem_max_label":"48Mi","cpu_use_ratio":0.016,"mem_use_ratio":0.06640625},"recommendation":{"cpu_request":0.01,"cpu_limit":0.045,"mem_request":41943040,"mem_limit":536870912,"cpu_request_label":"10m","cpu_limit_label":"45m","mem_request_label":"40Mi","mem_limit_label":"512Mi","reclaim_cpu_cores":0.49,"reclaim_mem_bytes":494927872,"reclaim_cpu_label":"490m","reclaim_mem_label":"472Mi"},"issues":[{"kind":"over_provisioned_cpu","severity":"warning","title":"CPU sovradimensionata","detail":"Usa 8m al p95 contro una richiesta di 500m (2%). Richiesta consigliata: 10m."},{"kind":"over_provisioned_mem","severity":"warning","title":"Memoria sovradimensionata","detail":"Usa 34Mi al p95 contro una richiesta di 512Mi (7%). Richiesta consigliata: 40Mi."}]}],"reclaimable_cpu":0.49,"reclaimable_mem":494927872.0,"severity":"warning","reclaimable_cpu_m":490,"reclaimable_mem_mi":472},{"name":"nightly-export-28371","namespace":"mercury-prod","node":"node-2","qos_class":"BestEffort","age_hours":12.0,"restarts":1,"oom_killed":false,"containers":[{"name":"export","qos_class":"BestEffort","spec":{"cpu_request":null,"cpu_limit":null,"mem_request":null,"mem_limit":null,"cpu_request_label":"—","cpu_limit_label":"—","mem_request_label":"—","mem_limit_label":"—"},"usage":{"cpu_avg":0.6,"cpu_p95":1.2,"cpu_max":2.1,"mem_avg":734003200,"mem_p95":943718400,"mem_max":1395864371.2,"cpu_throttle":0.0,"cpu_p95_label":"1.2","cpu_max_label":"2.1","mem_p95_label":"900Mi","mem_max_label":"1.3Gi","cpu_use_ratio":null,"mem_use_ratio":null},"recommendation":{"cpu_request":null,"cpu_limit":null,"mem_request":null,"mem_limit":null,"cpu_request_label":"—","cpu_limit_label":"—","mem_request_label":"—","mem_limit_label":"—","reclaim_cpu_cores":0.0,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":null,"reclaim_mem_label":null},"issues":[{"kind":"missing_requests","severity":"warning","title":"Requests assenti","detail":"Nessuna richiesta di CPU/memoria: lo scheduler non può posizionare il pod in modo affidabile (QoS BestEffort, primo candidato all'eviction)."},{"kind":"missing_limits","severity":"info","title":"Limits assenti","detail":"Nessun limite impostato: il container può saturare CPU/memoria del nodo."}]}],"reclaimable_cpu":0.0,"reclaimable_mem":0.0,"severity":"warning","reclaimable_cpu_m":0,"reclaimable_mem_mi":0},{"name":"ai-remediator-849f6c-k3l7m","namespace":"mercury-prod","node":"node-2","qos_class":"Guaranteed","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"remediator","qos_class":"Guaranteed","spec":{"cpu_request":0.5,"cpu_limit":0.5,"mem_request":536870912,"mem_limit":536870912,"cpu_request_label":"500m","cpu_limit_label":"500m","mem_request_label":"512Mi","mem_limit_label":"512Mi"},"usage":{"cpu_avg":0.31,"cpu_p95":0.41,"cpu_max":0.47,"mem_avg":377487360,"mem_p95":429916160,"mem_max":461373440,"cpu_throttle":0.02,"cpu_p95_label":"410m","cpu_max_label":"470m","mem_p95_label":"410Mi","mem_max_label":"440Mi","cpu_use_ratio":0.82,"mem_use_ratio":0.80078125},"recommendation":{"cpu_request":0.5,"cpu_limit":0.5,"mem_request":536870912,"mem_limit":536870912,"cpu_request_label":"500m","cpu_limit_label":"500m","mem_request_label":"512Mi","mem_limit_label":"512Mi","reclaim_cpu_cores":0.0,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":null,"reclaim_mem_label":null},"issues":[]}],"reclaimable_cpu":0.0,"reclaimable_mem":0.0,"severity":"ok","reclaimable_cpu_m":0,"reclaimable_mem_mi":0}]},"mercury-staging":{"namespace":"mercury-staging","window":"7d","generated_at":"2026-06-17T15:40:22+00:00","summary":{"pods_total":2,"reclaimable_cpu_cores":2.17,"reclaimable_cpu_label":"2.17","reclaimable_mem_bytes":1568669696.0,"reclaimable_mem_label":"1.46Gi","requested_cpu_cores":3.0,"requested_mem_bytes":6442450944,"cpu_savings_pct":72.3,"mem_savings_pct":24.3,"counts":{"critical":0,"warning":2,"info":0,"ok":0}},"pods":[{"name":"zaam-api-staging-66bd9-aa11b","namespace":"mercury-staging","node":"node-2","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"zaam-api","qos_class":"Burstable","spec":{"cpu_request":1.0,"cpu_limit":2.0,"mem_request":2147483648,"mem_limit":3221225472,"cpu_request_label":"1","cpu_limit_label":"2","mem_request_label":"2Gi","mem_limit_label":"3Gi"},"usage":{"cpu_avg":0.05,"cpu_p95":0.09,"cpu_max":0.2,"mem_avg":398458880,"mem_p95":482344960,"mem_max":629145600,"cpu_throttle":0.0,"cpu_p95_label":"90m","cpu_max_label":"200m","mem_p95_label":"460Mi","mem_max_label":"600Mi","cpu_use_ratio":0.09,"mem_use_ratio":0.224609375},"recommendation":{"cpu_request":0.11,"cpu_limit":0.3,"mem_request":578813952,"mem_limit":3221225472,"cpu_request_label":"110m","cpu_limit_label":"300m","mem_request_label":"552Mi","mem_limit_label":"3Gi","reclaim_cpu_cores":0.89,"reclaim_mem_bytes":1568669696,"reclaim_cpu_label":"890m","reclaim_mem_label":"1.46Gi"},"issues":[{"kind":"over_provisioned_cpu","severity":"warning","title":"CPU sovradimensionata","detail":"Usa 90m al p95 contro una richiesta di 1 (9%). Richiesta consigliata: 110m."},{"kind":"over_provisioned_mem","severity":"warning","title":"Memoria sovradimensionata","detail":"Usa 460Mi al p95 contro una richiesta di 2Gi (22%). Richiesta consigliata: 552Mi."}]}],"reclaimable_cpu":0.89,"reclaimable_mem":1568669696.0,"severity":"warning","reclaimable_cpu_m":890,"reclaimable_mem_mi":1496},{"name":"sqlserver-0","namespace":"mercury-staging","node":"node-1","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"mssql","qos_class":"Burstable","spec":{"cpu_request":2.0,"cpu_limit":2.0,"mem_request":4294967296,"mem_limit":4294967296,"cpu_request_label":"2","cpu_limit_label":"2","mem_request_label":"4Gi","mem_limit_label":"4Gi"},"usage":{"cpu_avg":0.3,"cpu_p95":0.6,"cpu_max":1.1,"mem_avg":2254857830.4,"mem_p95":2576980377.6,"mem_max":2899102924.8,"cpu_throttle":0.0,"cpu_p95_label":"600m","cpu_max_label":"1.1","mem_p95_label":"2.4Gi","mem_max_label":"2.7Gi","cpu_use_ratio":0.3,"mem_use_ratio":0.6},"recommendation":{"cpu_request":0.72,"cpu_limit":1.65,"mem_request":4294967296,"mem_limit":4294967296,"cpu_request_label":"720m","cpu_limit_label":"1.65","mem_request_label":"4Gi","mem_limit_label":"4Gi","reclaim_cpu_cores":1.28,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":"1.28","reclaim_mem_label":null},"issues":[{"kind":"over_provisioned_cpu","severity":"warning","title":"CPU sovradimensionata","detail":"Usa 600m al p95 contro una richiesta di 2 (30%). Richiesta consigliata: 720m."}]}],"reclaimable_cpu":1.28,"reclaimable_mem":0.0,"severity":"warning","reclaimable_cpu_m":1280,"reclaimable_mem_mi":0}]},"platform":{"namespace":"platform","window":"7d","generated_at":"2026-06-17T15:40:22+00:00","summary":{"pods_total":1,"reclaimable_cpu_cores":0.0,"reclaimable_cpu_label":"0m","reclaimable_mem_bytes":0.0,"reclaimable_mem_label":"0Mi","requested_cpu_cores":0.5,"requested_mem_bytes":2147483648,"cpu_savings_pct":0.0,"mem_savings_pct":0.0,"counts":{"critical":1,"warning":0,"info":0,"ok":0}},"pods":[{"name":"prometheus-0","namespace":"platform","node":"node-2","qos_class":"Burstable","age_hours":720.0,"restarts":0,"oom_killed":false,"containers":[{"name":"prometheus","qos_class":"Burstable","spec":{"cpu_request":0.5,"cpu_limit":1.0,"mem_request":2147483648,"mem_limit":2147483648,"cpu_request_label":"500m","cpu_limit_label":"1","mem_request_label":"2Gi","mem_limit_label":"2Gi"},"usage":{"cpu_avg":0.22,"cpu_p95":0.38,"cpu_max":0.55,"mem_avg":1610612736.0,"mem_p95":1825361100.8,"mem_max":1986422374.4,"cpu_throttle":0.0,"cpu_p95_label":"380m","cpu_max_label":"550m","mem_p95_label":"1.7Gi","mem_max_label":"1.85Gi","cpu_use_ratio":0.76,"mem_use_ratio":0.85},"recommendation":{"cpu_request":0.5,"cpu_limit":1.0,"mem_request":2147483648,"mem_limit":2977955840,"cpu_request_label":"500m","cpu_limit_label":"1","mem_request_label":"2Gi","mem_limit_label":"2.77Gi","reclaim_cpu_cores":0.0,"reclaim_mem_bytes":0.0,"reclaim_cpu_label":null,"reclaim_mem_label":null},"issues":[{"kind":"oom_risk","severity":"critical","title":"Rischio OOM","detail":"Il picco di memoria (1.85Gi) è al 92% del limite (2Gi). Limite consigliato: 2.77Gi."}]}],"reclaimable_cpu":0.0,"reclaimable_mem":0.0,"severity":"critical","reclaimable_cpu_m":0,"reclaimable_mem_mi":0}]}},"reports":{"mercury-prod":"# Report di ottimizzazione — namespace `mercury-prod`\n\n_Finestra di analisi: 7d · generato 2026-06-17T15:40:22+00:00_\n\n## Sintesi\n\n- Pod analizzati: **6** (2 critici, 3 da rivedere, 1 ok)\n- CPU recuperabile: **2.08** (48.9% del richiesto)\n- Memoria recuperabile: **2.78Gi** (37.1% del richiesto)\n\n## 🔴 Priorità alta — rischio affidabilità\n\n### `credit-recovery-5f7b9d-h8m2p`  ·  QoS: Burstable\n\n- **CPU in throttling** (credit-recovery): Il container è in throttling il 61% del tempo: il limite CPU (500m) è troppo basso e rallenta l'applicazione.\n\n```yaml\n# credit-recovery\nresources:\n  requests:\n    cpu: 250m\n    memory: 512Mi\n  limits:\n    cpu: 750m\n    memory: 768Mi\n```\n\n### `mongodb-0`  ·  QoS: Burstable\n> ⚠️ Già terminato per OOM in passato.\n\n- **OOMKilled in passato** (mongodb): Il container è già stato terminato per esaurimento memoria: alza la richiesta/limite di memoria.\n- **Rischio OOM** (mongodb): Il picco di memoria (1.98Gi) è al 99% del limite (2Gi). Limite consigliato: 2.97Gi.\n\n```yaml\n# mongodb\nresources:\n  requests:\n    cpu: 1\n    memory: 2Gi\n  limits:\n    cpu: 2\n    memory: 2.97Gi\n```\n\n## 🟠 Priorità media — spreco di risorse\n\n### `zaam-api-7d9c8b6f4-q2xkz`  ·  QoS: Burstable\n\n- **CPU sovradimensionata** (zaam-api): Usa 340m al p95 contro una richiesta di 2 (17%). Richiesta consigliata: 410m.\n- **Memoria sovradimensionata** (zaam-api): Usa 1.4Gi al p95 contro una richiesta di 4Gi (35%). Richiesta consigliata: 1.68Gi.\n\n```yaml\n# zaam-api\nresources:\n  requests:\n    cpu: 410m\n    memory: 1.68Gi\n  limits:\n    cpu: 930m\n    memory: 6Gi\n```\n\n### `zaam-frontend-6c4d8f-7tq9w`  ·  QoS: Burstable\n\n- **CPU sovradimensionata** (nginx): Usa 8m al p95 contro una richiesta di 500m (2%). Richiesta consigliata: 10m.\n- **Memoria sovradimensionata** (nginx): Usa 34Mi al p95 contro una richiesta di 512Mi (7%). Richiesta consigliata: 40Mi.\n\n```yaml\n# nginx\nresources:\n  requests:\n    cpu: 10m\n    memory: 40Mi\n  limits:\n    cpu: 45m\n    memory: 512Mi\n```\n\n### `nightly-export-28371`  ·  QoS: BestEffort\n\n- **Requests assenti** (export): Nessuna richiesta di CPU/memoria: lo scheduler non può posizionare il pod in modo affidabile (QoS BestEffort, primo candidato all'eviction).\n- **Limits assenti** (export): Nessun limite impostato: il container può saturare CPU/memoria del nodo.\n","mercury-staging":"# Report di ottimizzazione — namespace `mercury-staging`\n\n_Finestra di analisi: 7d · generato 2026-06-17T15:40:22+00:00_\n\n## Sintesi\n\n- Pod analizzati: **2** (0 critici, 2 da rivedere, 0 ok)\n- CPU recuperabile: **2.17** (72.3% del richiesto)\n- Memoria recuperabile: **1.46Gi** (24.3% del richiesto)\n\n## 🟠 Priorità media — spreco di risorse\n\n### `zaam-api-staging-66bd9-aa11b`  ·  QoS: Burstable\n\n- **CPU sovradimensionata** (zaam-api): Usa 90m al p95 contro una richiesta di 1 (9%). Richiesta consigliata: 110m.\n- **Memoria sovradimensionata** (zaam-api): Usa 460Mi al p95 contro una richiesta di 2Gi (22%). Richiesta consigliata: 552Mi.\n\n```yaml\n# zaam-api\nresources:\n  requests:\n    cpu: 110m\n    memory: 552Mi\n  limits:\n    cpu: 300m\n    memory: 3Gi\n```\n\n### `sqlserver-0`  ·  QoS: Burstable\n\n- **CPU sovradimensionata** (mssql): Usa 600m al p95 contro una richiesta di 2 (30%). Richiesta consigliata: 720m.\n\n```yaml\n# mssql\nresources:\n  requests:\n    cpu: 720m\n    memory: 4Gi\n  limits:\n    cpu: 1.65\n    memory: 4Gi\n```\n","platform":"# Report di ottimizzazione — namespace `platform`\n\n_Finestra di analisi: 7d · generato 2026-06-17T15:40:22+00:00_\n\n## Sintesi\n\n- Pod analizzati: **1** (1 critici, 0 da rivedere, 0 ok)\n- CPU recuperabile: **0m** (0.0% del richiesto)\n- Memoria recuperabile: **0Mi** (0.0% del richiesto)\n\n## 🔴 Priorità alta — rischio affidabilità\n\n### `prometheus-0`  ·  QoS: Burstable\n\n- **Rischio OOM** (prometheus): Il picco di memoria (1.85Gi) è al 92% del limite (2Gi). Limite consigliato: 2.77Gi.\n\n```yaml\n# prometheus\nresources:\n  requests:\n    cpu: 500m\n    memory: 2Gi\n  limits:\n    cpu: 1\n    memory: 2.77Gi\n```\n"}};</script>
+<script>
+(function () {
+  "use strict";
+  const $ = (s) => document.querySelector(s);
+  const el = (t, c, h) => { const e = document.createElement(t); if (c) e.className = c; if (h != null) e.innerHTML = h; return e; };
+
+  const SEV = ["critical", "warning", "info", "ok"];
+  const SEV_LABEL = { critical: "Critici", warning: "Da rivedere", info: "Info", ok: "Ok" };
+  const state = { ns: null, analysis: null, filter: "all", search: "", selected: null, live: false, health: null };
+
+  // ---- data layer: try API, fall back to bundled demo ----
+  async function api(path, opts) {
+    const r = await fetch(path, opts);
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    return r.json();
+  }
+  const demo = () => window.BUNDLED_DEMO;
+
+  async function loadHealth() {
+    try { state.health = await api("/api/health"); state.live = !state.health.demo_mode; return; }
+    catch (e) { state.live = false; state.health = demo() ? demo().health : { demo_mode: true, llm_provider: "mock", analysis_window: "7d" }; }
+  }
+  async function loadNamespaces() {
+    if (state.live || !demo()) { try { return (await api("/api/namespaces")).namespaces; } catch (e) {} }
+    return demo() ? demo().namespaces : [];
+  }
+  async function loadAnalysis(ns) {
+    if (state.live) return api("/api/analysis?namespace=" + encodeURIComponent(ns));
+    if (demo() && demo().analyses[ns]) return demo().analyses[ns];
+    // last resort: hit API anyway
+    return api("/api/analysis?namespace=" + encodeURIComponent(ns));
+  }
+  async function loadReport(ns) {
+    if (state.live) return api("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ namespace: ns }) });
+    if (demo() && demo().reports[ns]) return { provider: "mock (demo)", markdown: demo().reports[ns] };
+    return api("/api/report", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ namespace: ns }) });
+  }
+
+  // ---- helpers ----
+  function barFor(spec, usage, kind) {
+    // kind: "cpu" | "mem"
+    const req = kind === "cpu" ? spec.cpu_request : spec.mem_request;
+    const lim = kind === "cpu" ? spec.cpu_limit : spec.mem_limit;
+    const used = kind === "cpu" ? usage.cpu_p95 : usage.mem_p95;
+    const usedLbl = kind === "cpu" ? usage.cpu_p95_label : usage.mem_p95_label;
+    const reqLbl = kind === "cpu" ? spec.cpu_request_label : spec.mem_request_label;
+    const ratio = kind === "cpu" ? usage.cpu_use_ratio : usage.mem_use_ratio;
+
+    const domain = Math.max(lim || 0, req || 0, used || 0, 1e-9);
+    const usedPct = Math.min(100, (used || 0) / domain * 100);
+    const reqPct = req ? Math.min(100, req / domain * 100) : null;
+
+    let cls = "ok";
+    if (ratio != null && ratio < 0.5 && req) cls = "warn";       // over-provisioned
+    const limRatio = lim && used ? used / lim : 0;
+    if (limRatio >= 0.9) cls = "crit";                            // near limit
+
+    const wrap = el("div", "rvr");
+    const nums = el("div", "nums");
+    nums.appendChild(el("span", "used mono", usedLbl || "—"));
+    nums.appendChild(el("span", "req mono", "/ " + (reqLbl || "—")));
+    wrap.appendChild(nums);
+    const bar = el("div", "bar");
+    const fill = el("div", "fill " + cls); fill.style.width = usedPct + "%"; bar.appendChild(fill);
+    if (reqPct != null) { const t = el("div", "reqtick"); t.style.left = reqPct + "%"; t.title = "richiesta"; bar.appendChild(t); }
+    wrap.appendChild(bar);
+    return wrap;
+  }
+
+  function podRow(p) {
+    const tr = el("tr"); tr.dataset.pod = p.name;
+    if (state.selected === p.name) tr.classList.add("sel");
+
+    const sev = el("td", "sevcell");
+    sev.appendChild(el("span", "sevdot " + p.severity));
+    tr.appendChild(sev);
+
+    const name = el("td");
+    name.appendChild(el("div", "podname", p.name));
+    const meta = el("div", "podmeta");
+    meta.innerHTML = (p.qos_class ? "<span class='qos'>" + p.qos_class + "</span> " : "") +
+      (p.node ? "· " + p.node : "");
+    name.appendChild(meta);
+    tr.appendChild(name);
+
+    // aggregate first container for the row bars (detail shows all)
+    const c0 = p.containers[0] || { spec: {}, usage: {} };
+    const cpuTd = el("td"); cpuTd.appendChild(barFor(c0.spec, c0.usage, "cpu")); tr.appendChild(cpuTd);
+    const memTd = el("td", "hide"); memTd.appendChild(barFor(c0.spec, c0.usage, "mem")); tr.appendChild(memTd);
+
+    const thr = el("td", "num hide");
+    const tv = Math.round((c0.usage.cpu_throttle || 0) * 100);
+    thr.innerHTML = "<span class='throttle " + (tv >= 25 ? "bad" : "") + "'>" + tv + "%</span>";
+    tr.appendChild(thr);
+
+    const rs = el("td", "num");
+    let rsh = "<span class='mono'>" + (p.restarts || 0) + "</span>";
+    if (p.oom_killed) rsh += " <span class='badge-oom'>OOM</span>";
+    rs.innerHTML = rsh; tr.appendChild(rs);
+
+    const rec = el("td", "num");
+    const hasReclaim = p.reclaimable_cpu_m || p.reclaimable_mem_mi;
+    const parts = [];
+    if (p.reclaimable_cpu_m) parts.push(p.reclaimable_cpu_m + "m");
+    if (p.reclaimable_mem_mi) parts.push(formatMi(p.reclaimable_mem_mi));
+    rec.innerHTML = "<span class='reclaim " + (hasReclaim ? "" : "zero") + "'>" + (hasReclaim ? parts.join(" · ") : "—") + "</span>";
+    tr.appendChild(rec);
+
+    const chev = el("td", "chev", "›"); tr.appendChild(chev);
+    tr.addEventListener("click", () => openDrawer(p.name));
+    return tr;
+  }
+
+  function formatMi(mi) {
+    if (mi >= 1024) return (mi / 1024).toFixed(mi % 1024 ? 1 : 0).replace(/\.0$/, "") + "Gi";
+    return mi + "Mi";
+  }
+
+  function renderTable() {
+    const a = state.analysis;
+    const wrap = $("#tablewrap");
+    wrap.innerHTML = "";
+    let pods = a.pods.slice();
+    if (state.filter !== "all") pods = pods.filter((p) => p.severity === state.filter);
+    if (state.search) { const q = state.search.toLowerCase(); pods = pods.filter((p) => p.name.toLowerCase().includes(q)); }
+
+    if (!pods.length) { wrap.appendChild(el("div", "state", "Nessun pod corrisponde ai filtri.")); return; }
+
+    const table = el("table");
+    table.innerHTML =
+      "<thead><tr><th class='sevcell'></th><th>Pod</th><th>CPU · uso / richiesta</th>" +
+      "<th class='hide'>Memoria · uso / richiesta</th><th class='num hide'>Throttle</th>" +
+      "<th class='num'>Restart</th><th class='num'>Recuperabile</th><th></th></tr></thead>";
+    const tb = el("tbody");
+    pods.forEach((p) => tb.appendChild(podRow(p)));
+    table.appendChild(tb);
+    wrap.appendChild(table);
+  }
+
+  function renderSummary() {
+    const s = state.analysis.summary;
+    const c = $("#summary"); c.innerHTML = "";
+    const cards = [
+      { cls: "card hero", label: "CPU recuperabile", val: bigSplit(s.reclaimable_cpu_label),
+        sub: s.cpu_savings_pct + "% del CPU richiesto nel namespace" },
+      { cls: "card hero", label: "Memoria recuperabile", val: bigSplit(s.reclaimable_mem_label),
+        sub: s.mem_savings_pct + "% della memoria richiesta" },
+      { cls: "card", label: "Da ottimizzare", val: (s.counts.critical + s.counts.warning) + "",
+        pills: true },
+      { cls: "card", label: "Pod analizzati", val: s.pods_total + "",
+        sub: "finestra " + state.analysis.window },
+    ];
+    cards.forEach((cd) => {
+      const e = el("div", cd.cls);
+      e.appendChild(el("div", "klabel", cd.label));
+      e.appendChild(el("div", "kval", cd.val));
+      if (cd.pills) {
+        const pr = el("div", "pill-row");
+        [["crit", s.counts.critical, "critici"], ["warn", s.counts.warning, "da rivedere"], ["ok", s.counts.ok, "ok"]]
+          .forEach(([k, n, lbl]) => pr.appendChild(el("span", "pill", "<span class='d " + k + "'></span>" + n + " " + lbl)));
+        e.appendChild(pr);
+      } else if (cd.sub) {
+        e.appendChild(el("div", "ksub", cd.sub));
+      }
+      c.appendChild(e);
+    });
+  }
+  function bigSplit(label) {
+    const m = String(label).match(/^([\d.]+)(\D+)$/);
+    if (!m) return label;
+    return m[1] + "<span class='unit'>" + m[2] + "</span>";
+  }
+
+  function renderFilters() {
+    const counts = state.analysis.summary.counts;
+    const f = $("#filters"); f.innerHTML = "";
+    const total = state.analysis.summary.pods_total;
+    const items = [["all", "Tutti", total]].concat(SEV.map((s) => [s, SEV_LABEL[s], counts[s]]));
+    items.forEach(([key, lbl, n]) => {
+      if (key !== "all" && !n) return;
+      const b = el("button", state.filter === key ? "on" : "");
+      b.innerHTML = (key === "all" ? "" : "<span class='d " + key + "'></span>") + lbl + " <span class='count'>" + n + "</span>";
+      b.onclick = () => { state.filter = key; renderFilters(); renderTable(); };
+      f.appendChild(b);
+    });
+  }
+
+  // ---- drawer ----
+  function openDrawer(podName) {
+    const p = state.analysis.pods.find((x) => x.name === podName);
+    if (!p) return;
+    state.selected = podName; renderTable();
+    $("#dtitle").textContent = p.name;
+    const sub = $("#dsub"); sub.innerHTML = "";
+    sub.appendChild(el("span", "qos", p.qos_class || "n/d"));
+    if (p.node) sub.appendChild(el("span", null, "· " + p.node));
+    if (p.restarts) sub.appendChild(el("span", null, "· " + p.restarts + " restart"));
+    if (p.oom_killed) sub.appendChild(el("span", "badge-oom", "OOMKilled"));
+
+    const body = $("#dbody"); body.innerHTML = "";
+    p.containers.forEach((c) => body.appendChild(containerBlock(c)));
+    $("#scrim").classList.add("open"); $("#drawer").classList.add("open");
+  }
+  function closeDrawer() {
+    $("#scrim").classList.remove("open"); $("#drawer").classList.remove("open");
+    state.selected = null; renderTable();
+  }
+
+  function containerBlock(c) {
+    const b = el("div", "cblock");
+    b.appendChild(el("h3", null, "<span class='sevdot " + c.severity + "'></span>" + c.name));
+
+    if (!c.issues.length) {
+      b.appendChild(el("div", "ok-empty", "✓ Risorse ben dimensionate, nessun intervento necessario."));
+      return b;
+    }
+    c.issues.forEach((i) => {
+      const row = el("div", "issue");
+      const ic = el("span", "ic"); ic.style.background = "var(--" + (i.severity === "critical" ? "crit" : i.severity === "warning" ? "warn" : "info") + ")";
+      row.appendChild(ic);
+      row.appendChild(el("div", null, "<span class='it'>" + i.title + "</span><br><span class='id'>" + i.detail + "</span>"));
+      b.appendChild(row);
+    });
+
+    // current -> recommended
+    const sp = c.spec, rc = c.recommendation;
+    const g = el("div", "recgrid");
+    g.innerHTML =
+      "<span class='rh'></span><span class='rh'>Attuale</span><span class='rh'>Consigliato</span>" +
+      rowRec("CPU req", sp.cpu_request_label, rc.cpu_request_label) +
+      rowRec("CPU lim", sp.cpu_limit_label, rc.cpu_limit_label) +
+      rowRec("Mem req", sp.mem_request_label, rc.mem_request_label) +
+      rowRec("Mem lim", sp.mem_limit_label, rc.mem_limit_label);
+    b.appendChild(g);
+
+    // yaml
+    const changed = rc.cpu_request_label !== sp.cpu_request_label || rc.cpu_limit_label !== sp.cpu_limit_label ||
+      rc.mem_request_label !== sp.mem_request_label || rc.mem_limit_label !== sp.mem_limit_label;
+    if (changed) b.appendChild(yamlSnippet(c));
+    return b;
+  }
+  function rowRec(label, cur, neu) {
+    const same = cur === neu;
+    return "<span class='cur' style='color:var(--muted-2)'>" + label + "</span>" +
+      "<span class='cur'>" + cur + "</span>" +
+      (same ? "<span class='cur'>" + neu + "</span>"
+            : "<span class='new'>" + neu + " <span class='arrow'>←</span></span>");
+  }
+  function yamlSnippet(c) {
+    const rc = c.recommendation;
+    const txt =
+`resources:
+  requests:
+    cpu: ${rc.cpu_request_label}
+    memory: ${rc.mem_request_label}
+  limits:
+    cpu: ${rc.cpu_limit_label}
+    memory: ${rc.mem_limit_label}`;
+    const pre = el("pre", "yaml");
+    pre.innerHTML = txt
+      .replace(/(resources|requests|limits|cpu|memory):/g, "<span class='k'>$1</span>:")
+      .replace(/: (\S+)/g, ": <span class='v'>$1</span>");
+    const btn = el("button", "copy", "Copia");
+    btn.onclick = () => { navigator.clipboard.writeText(txt); btn.textContent = "Copiato ✓"; setTimeout(() => btn.textContent = "Copia", 1400); };
+    pre.appendChild(btn);
+    return pre;
+  }
+
+  // ---- report ----
+  let lastReportMd = "";
+  async function genReport() {
+    const btn = $("#genreport"); const orig = btn.innerHTML;
+    btn.disabled = true; btn.innerHTML = "Generazione…";
+    $("#modal").classList.add("open");
+    $("#reportmd").innerHTML = "<div class='state'><div class='spin'></div>Il modello sta analizzando i risultati…</div>";
+    try {
+      const res = await loadReport(state.ns);
+      lastReportMd = res.markdown || "";
+      $("#provtag").textContent = (res.fallback ? "fallback · " : "") + (res.provider || "");
+      $("#reportmd").innerHTML = renderMarkdown(lastReportMd);
+      if (res.error && !res.fallback) $("#reportmd").innerHTML = "<div class='state err'>" + res.error + "</div>";
+    } catch (e) {
+      $("#reportmd").innerHTML = "<div class='state err'>Errore generazione report: " + e.message + "</div>";
+    } finally { btn.disabled = false; btn.innerHTML = orig; }
+  }
+
+  // minimal, dependency-free markdown renderer
+  function renderMarkdown(md) {
+    const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const lines = md.split("\n");
+    let html = "", inUl = false, inCode = false, codeBuf = [];
+    const flushUl = () => { if (inUl) { html += "</ul>"; inUl = false; } };
+    const inline = (t) => esc(t)
+      .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+      .replace(/`([^`]+)`/g, "<code>$1</code>");
+    for (let raw of lines) {
+      if (raw.trim().startsWith("```")) {
+        if (!inCode) { inCode = true; codeBuf = []; flushUl(); }
+        else { inCode = false; html += "<pre><code>" + esc(codeBuf.join("\n")) + "</code></pre>"; }
+        continue;
+      }
+      if (inCode) { codeBuf.push(raw); continue; }
+      if (/^### /.test(raw)) { flushUl(); html += "<h3>" + inline(raw.slice(4)) + "</h3>"; }
+      else if (/^## /.test(raw)) { flushUl(); html += "<h2>" + inline(raw.slice(3)) + "</h2>"; }
+      else if (/^# /.test(raw)) { flushUl(); html += "<h1>" + inline(raw.slice(2)) + "</h1>"; }
+      else if (/^> /.test(raw)) { flushUl(); html += "<blockquote>" + inline(raw.slice(2)) + "</blockquote>"; }
+      else if (/^[-*] /.test(raw)) { if (!inUl) { html += "<ul>"; inUl = true; } html += "<li>" + inline(raw.slice(2)) + "</li>"; }
+      else if (/^_.*_$/.test(raw.trim()) && raw.trim().length > 2) { flushUl(); html += "<p><em>" + inline(raw.trim().slice(1, -1)) + "</em></p>"; }
+      else if (raw.trim() === "") { flushUl(); }
+      else { flushUl(); html += "<p>" + inline(raw) + "</p>"; }
+    }
+    flushUl();
+    return html;
+  }
+
+  function downloadReport() {
+    const blob = new Blob([lastReportMd], { type: "text/markdown" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = "report-ottimizzazione-" + state.ns + ".md"; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ---- orchestration ----
+  async function selectNamespace(ns) {
+    state.ns = ns; state.selected = null;
+    $("#tablewrap").innerHTML = "<div class='state'><div class='spin'></div>Analisi di <b>" + ns + "</b>…</div>";
+    try {
+      state.analysis = await loadAnalysis(ns);
+      renderSummary(); renderFilters(); renderTable();
+    } catch (e) {
+      $("#tablewrap").innerHTML = "<div class='state err'>Analisi fallita: " + e.message + "</div>";
+    }
+  }
+
+  async function init() {
+    await loadHealth();
+    const h = $("#health"), txt = $("#healthtxt");
+    if (state.live) { txt.textContent = "Live · " + (state.health.llm_provider || "—"); }
+    else { h.classList.add("demo"); txt.textContent = "Demo · " + (state.health.llm_provider || "mock"); }
+
+    const namespaces = await loadNamespaces();
+    const sel = $("#ns"); sel.innerHTML = "";
+    namespaces.forEach((n) => { const o = el("option"); o.value = n; o.textContent = n; sel.appendChild(o); });
+    sel.onchange = () => selectNamespace(sel.value);
+
+    if (namespaces.length) await selectNamespace(namespaces[0]);
+    else $("#tablewrap").innerHTML = "<div class='state'>Nessun namespace disponibile.</div>";
+  }
+
+  // events
+  $("#refresh").onclick = () => state.ns && selectNamespace(state.ns);
+  $("#genreport").onclick = genReport;
+  $("#dclose").onclick = closeDrawer;
+  $("#scrim").onclick = closeDrawer;
+  $("#mclose").onclick = () => $("#modal").classList.remove("open");
+  $("#mbg").onclick = () => $("#modal").classList.remove("open");
+  $("#dlreport").onclick = downloadReport;
+  $("#search").addEventListener("input", (e) => { state.search = e.target.value; renderTable(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); $("#modal").classList.remove("open"); } });
+
+  init();
+})();
+</script>
+</body>
+</html>
