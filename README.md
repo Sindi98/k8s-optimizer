@@ -2,6 +2,8 @@
 
 [![CI](https://github.com/Sindi98/k8s-optimizer/actions/workflows/ci.yml/badge.svg)](https://github.com/Sindi98/k8s-optimizer/actions/workflows/ci.yml)
 
+🌐 [English](README.en.md) · **Italiano**
+
 Analizza i pod di un cluster Kubernetes usando le metriche reali di **Prometheus**
 e il **Kubernetes API**, calcola le ottimizzazioni di risorse (right-sizing di
 `requests`/`limits`, throttling, rischio OOM, pod inattivi) e genera un **report

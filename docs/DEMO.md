@@ -1,5 +1,7 @@
 # Guida completa — Ambiente di demo su Docker Desktop
 
+🌐 [English](DEMO.en.md) · **Italiano**
+
 Questa guida installa da zero un ambiente di demo per **Reclaim · Kube Optimizer**
 su **Docker Desktop (Kubernetes)**, usando una registry locale su
 `host.docker.internal:5050`. L'optimizer gira in **modalità live** (analizza i pod
