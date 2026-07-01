@@ -24,6 +24,11 @@ from .models import NamespaceAnalysis
 
 log = logging.getLogger("llm")
 
+# Hard ceiling for a single report call so a slow/hung provider can't pin the
+# request thread until the SDK's (multi-minute) default timeout.
+REPORT_TIMEOUT = 120.0
+MAX_REPORT_TOKENS = 2000
+
 SYSTEM_PROMPT = (
     "Sei un esperto di ottimizzazione di risorse Kubernetes (right-sizing, QoS, HPA). "
     "Ricevi un'analisi GIÀ CALCOLATA di un namespace con metriche reali da Prometheus. "
@@ -93,27 +98,37 @@ def _user_prompt(analysis: NamespaceAnalysis) -> str:
 
 def _report_anthropic(analysis: NamespaceAnalysis) -> str:
     import anthropic
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    client = anthropic.Anthropic(api_key=settings.anthropic_api_key, timeout=REPORT_TIMEOUT)
     msg = client.messages.create(
         model=settings.anthropic_model,
-        max_tokens=2000,
+        max_tokens=MAX_REPORT_TOKENS,
         system=SYSTEM_PROMPT.format(lang=settings.report_language),
         messages=[{"role": "user", "content": _user_prompt(analysis)}],
     )
-    return "".join(block.text for block in msg.content if block.type == "text")
+    text = "".join(block.text for block in msg.content if block.type == "text")
+    if not text.strip():
+        # no text content (e.g. non-text stop) -> let generate_report fall back to mock
+        raise RuntimeError(f"Risposta senza testo dal modello (stop_reason={getattr(msg, 'stop_reason', '?')}).")
+    return text
 
 
 def _report_openai(analysis: NamespaceAnalysis) -> str:
     from openai import OpenAI
-    client = OpenAI(api_key=settings.openai_api_key)
+    client = OpenAI(api_key=settings.openai_api_key, timeout=REPORT_TIMEOUT)
     resp = client.chat.completions.create(
         model=settings.openai_model,
+        max_tokens=MAX_REPORT_TOKENS,
         messages=[
             {"role": "system", "content": SYSTEM_PROMPT.format(lang=settings.report_language)},
             {"role": "user", "content": _user_prompt(analysis)},
         ],
     )
-    return resp.choices[0].message.content or ""
+    if not resp.choices:
+        raise RuntimeError("Risposta OpenAI priva di scelte (choices vuoto).")
+    text = resp.choices[0].message.content or ""
+    if not text.strip():
+        raise RuntimeError("Risposta OpenAI senza contenuto testuale.")
+    return text
 
 
 def _report_ollama(analysis: NamespaceAnalysis) -> str:
@@ -126,9 +141,16 @@ def _report_ollama(analysis: NamespaceAnalysis) -> str:
             {"role": "user", "content": _user_prompt(analysis)},
         ],
     }
-    r = httpx.post(url, json=payload, timeout=120.0)
+    r = httpx.post(url, json=payload, timeout=REPORT_TIMEOUT)
     r.raise_for_status()
-    return r.json()["message"]["content"]
+    data = r.json()
+    # Ollama can answer HTTP 200 with an {"error": "..."} body (e.g. unknown model).
+    if isinstance(data, dict) and data.get("error"):
+        raise RuntimeError(str(data["error"]))
+    try:
+        return data["message"]["content"]
+    except (KeyError, TypeError) as exc:
+        raise RuntimeError(f"Risposta Ollama inattesa: {data!r}") from exc
 
 
 def _report_mock(analysis: NamespaceAnalysis) -> str:
@@ -302,12 +324,26 @@ def test_provider() -> dict:
                             "cluster usa http://host.docker.internal:11434, non localhost.",
                 }
             models = [m.get("name", "") for m in r.json().get("models", [])]
-            has_model = any(m == target or m.startswith(f"{target}:") or target in m for m in models)
-            detail = f"Ollama raggiungibile su {host}: {len(models)} modelli installati."
-            if models and not has_model:
-                shown = ", ".join(models[:8])
-                detail += f" Attenzione: '{target}' non è tra i modelli installati ({shown})."
-            return {"ok": True, "provider": provider, "model": target, "models": models, "detail": detail}
+            # exact name or name+tag only — a substring test would treat
+            # 'mistral-nemo' as satisfying a request for 'mistral'.
+            has_model = any(m == target or m.startswith(f"{target}:") for m in models)
+            if not has_model:
+                # host is reachable but the configured model can't serve a report,
+                # so the test must NOT report success (avoid misleading green check).
+                if models:
+                    shown = ", ".join(models[:8])
+                    err = f"Il modello '{target}' non è tra quelli installati su {host}."
+                    hint = f"Disponibili: {shown}. Scaricalo con `ollama pull {target}` o scegline uno installato."
+                else:
+                    err = f"Nessun modello installato su {host}."
+                    hint = f"Scarica un modello con `ollama pull {target}`."
+                return {"ok": False, "provider": provider, "model": target,
+                        "models": models, "error": err, "hint": hint}
+            return {
+                "ok": True, "provider": provider, "model": target, "models": models,
+                "detail": f"Ollama raggiungibile su {host}: '{target}' installato "
+                          f"({len(models)} modelli totali).",
+            }
 
         return {"ok": False, "provider": provider, "error": f"Provider sconosciuto: {provider}"}
     except Exception as exc:  # noqa: BLE001

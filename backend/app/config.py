@@ -83,8 +83,10 @@ class Settings:
     risk_ratio: float = field(default_factory=lambda: _get_float("RISK_RATIO", 0.9))
     # CPU throttling above this fraction is flagged.
     throttle_ratio: float = field(default_factory=lambda: _get_float("THROTTLE_RATIO", 0.25))
-    # A container below this CPU usage (cores, p95) and near-zero memory is "idle".
+    # A container below this CPU usage (cores, p95) and below idle_mem_bytes is "idle".
     idle_cpu_cores: float = field(default_factory=lambda: _get_float("IDLE_CPU_CORES", 0.005))
+    # Memory (bytes, p95) below which — together with idle CPU — a container is "idle".
+    idle_mem_bytes: float = field(default_factory=lambda: _get_float("IDLE_MEM_BYTES", 32 * 1024 ** 2))
 
 
 settings = Settings()
@@ -124,6 +126,7 @@ EDITABLE_FIELDS: dict[str, type] = {
     "risk_ratio": float,
     "throttle_ratio": float,
     "idle_cpu_cores": float,
+    "idle_mem_bytes": float,
 }
 
 # Never echoed back to the client; only a "<field>_set" boolean is exposed.
@@ -137,6 +140,9 @@ _WINDOW_RE = re.compile(r"^(\d+[smhdwy])+$")
 
 _lock = threading.Lock()
 _on_change: list[Callable[[], None]] = []
+# Whether the current in-memory config is known to be safely persisted to disk.
+# Reflects the real outcome of the last write, not merely that the file exists.
+_persisted_ok: bool = False
 
 
 def register_on_change(fn: Callable[[], None]) -> None:
@@ -171,8 +177,13 @@ def _validate(name: str, value: Any) -> str | None:
     if name == "analysis_window":
         if not value or not _WINDOW_RE.match(str(value)):
             return "Finestra non valida (es. 24h, 7d, 2w)."
+        # a zero-length window (e.g. "0d") passes the regex but breaks every PromQL query
+        if all(int(n) == 0 for n in re.findall(r"(\d+)[smhdwy]", str(value))):
+            return "La finestra di analisi deve essere maggiore di zero."
     if name == "prometheus_url" and value and not str(value).startswith(("http://", "https://")):
         return "L'URL di Prometheus deve iniziare con http:// o https://."
+    if name == "ollama_host" and value and not str(value).startswith(("http://", "https://")):
+        return "L'host Ollama deve iniziare con http:// o https://."
     if name == "prom_timeout" and not (0 < float(value) <= 600):
         return "Timeout Prometheus fuori range (0 < t ≤ 600 s)."
     # ratios expressed as a fraction of request/limit
@@ -183,6 +194,8 @@ def _validate(name: str, value: Any) -> str | None:
         return f"{name} deve essere compreso tra 1.0 e 5.0."
     if name == "idle_cpu_cores" and not (0 <= float(value) <= 1):
         return "idle_cpu_cores deve essere compreso tra 0 e 1 (core)."
+    if name == "idle_mem_bytes" and float(value) < 0:
+        return "idle_mem_bytes non può essere negativo."
     return None
 
 
@@ -218,19 +231,43 @@ def _apply(values: dict) -> None:
     settings.llm_provider = (settings.llm_provider or "mock").lower()
 
 
-def _persist() -> None:
+def _persist() -> bool:
+    """Persist the current settings atomically. Returns True on success.
+
+    Writes to a temp file in the same directory and ``os.replace``s it over the
+    target, so a crash or full disk mid-write can never leave a truncated
+    (unparseable) config that would silently wipe every override at next boot.
+    """
+    global _persisted_ok
     try:
         path = Path(CONFIG_PATH)
         path.parent.mkdir(parents=True, exist_ok=True)
         snapshot = {key: getattr(settings, key) for key in EDITABLE_FIELDS}
-        path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False))
+        fd, tmp = tempfile.mkstemp(prefix=".kube-optimizer-config-", dir=str(path.parent))
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(snapshot, fh, indent=2, ensure_ascii=False)
+                fh.flush()
+                os.fsync(fh.fileno())
+            os.replace(tmp, path)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
         log.info("Configurazione salvata in %s", CONFIG_PATH)
+        _persisted_ok = True
+        return True
     except OSError as exc:
         log.warning("Configurazione non persistita (%s non scrivibile): %s", CONFIG_PATH, exc)
+        _persisted_ok = False
+        return False
 
 
 def load_persisted() -> None:
     """Load and apply runtime overrides from disk, if present. Called at boot."""
+    global _persisted_ok
     path = Path(CONFIG_PATH)
     if not path.exists():
         return
@@ -243,6 +280,7 @@ def load_persisted() -> None:
     if errors:
         log.warning("Override ignorati (non validi) da %s: %s", CONFIG_PATH, errors)
     _apply(clean)
+    _persisted_ok = True
     log.info("Override di configurazione caricati da %s", CONFIG_PATH)
 
 
@@ -268,6 +306,7 @@ def update(data: dict) -> dict:
 
 def reset() -> dict:
     """Drop all runtime overrides and fall back to environment defaults."""
+    global _persisted_ok
     with _lock:
         for key, value in vars(Settings()).items():
             setattr(settings, key, value)
@@ -275,6 +314,7 @@ def reset() -> dict:
             Path(CONFIG_PATH).unlink(missing_ok=True)
         except OSError as exc:
             log.warning("Impossibile rimuovere %s: %s", CONFIG_PATH, exc)
+        _persisted_ok = False
     for fn in _on_change:
         try:
             fn()
@@ -292,7 +332,9 @@ def public_dict() -> dict[str, Any]:
         else:
             out[key] = getattr(settings, key)
     out["config_path"] = CONFIG_PATH
-    out["config_persisted"] = Path(CONFIG_PATH).exists()
+    # reflect whether the last write actually succeeded — not merely that some
+    # (possibly stale) file exists on a read-only mount.
+    out["config_persisted"] = _persisted_ok and Path(CONFIG_PATH).exists()
     return out
 
 

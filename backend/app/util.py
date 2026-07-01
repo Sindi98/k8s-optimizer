@@ -1,6 +1,7 @@
 """Helpers for parsing Kubernetes resource quantities and formatting values."""
 from __future__ import annotations
 
+import math
 import re
 
 # --- CPU --------------------------------------------------------------------
@@ -84,15 +85,20 @@ def format_memory(num_bytes: float | None) -> str:
 
 
 def round_millicores(cores: float, floor_m: int = 10, step_m: int = 5) -> float:
-    """Round a recommended CPU value up to a sensible millicore step."""
+    """Round a recommended CPU value up to a sensible millicore step.
+
+    Rounds *up* (ceil) to the step: a recommendation must never land below the
+    buffered target it was derived from, otherwise the tool could suggest a
+    request/limit under the observed usage of the very container it flagged.
+    """
     m = max(floor_m, cores * 1000)
-    m = step_m * round(m / step_m)
+    m = step_m * math.ceil(m / step_m)
     return max(floor_m, m) / 1000.0
 
 
 def round_memory_mi(num_bytes: float, floor_mi: int = 16, step_mi: int = 8) -> float:
-    """Round a recommended memory value up to a sensible Mi step."""
+    """Round a recommended memory value up to a sensible Mi step (ceil, see above)."""
     mi = 1024 ** 2
     val = max(floor_mi, num_bytes / mi)
-    val = step_mi * round(val / step_mi)
+    val = step_mi * math.ceil(val / step_mi)
     return max(floor_mi, val) * mi

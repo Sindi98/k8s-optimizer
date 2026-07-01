@@ -55,3 +55,11 @@ def test_rounding_floors():
     assert round_millicores(0.0024) == 0.01
     # memory rounds up to at least the 16Mi floor
     assert round_memory_mi(1 * MI) == 16 * MI
+
+
+def test_rounding_is_ceil_not_nearest():
+    # a value just above a step midpoint must round UP, never down below it,
+    # so a buffered recommendation never lands under the observed usage
+    assert round_millicores(0.041) == 0.045          # 41m -> next 5m step
+    assert round_memory_mi(219 * MI) >= 219 * MI      # never below the input
+    assert round_memory_mi(219 * MI) == 224 * MI      # 219 -> next 8Mi step

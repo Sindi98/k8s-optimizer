@@ -61,12 +61,17 @@ class KubernetesClient:
 
         restarts = 0
         oom = False
-        for cs in (status.container_statuses or []):
+        # Include init containers: a crash-looping init container (failed
+        # migration / wait-for-dependency) is a real reliability signal too.
+        statuses = list(status.container_statuses or []) + list(status.init_container_statuses or [])
+        for cs in statuses:
             restarts += cs.restart_count or 0
-            last = getattr(cs, "last_state", None)
-            term = getattr(last, "terminated", None) if last else None
-            if term and (term.reason == "OOMKilled"):
-                oom = True
+            # OOMKilled can be in the CURRENT state (terminated, not yet restarted)
+            # or in the PREVIOUS state (last_state) after a restart.
+            for st in (getattr(cs, "state", None), getattr(cs, "last_state", None)):
+                term = getattr(st, "terminated", None) if st else None
+                if term and getattr(term, "reason", None) == "OOMKilled":
+                    oom = True
 
         containers: list[ContainerSpec] = []
         for c in (p.spec.containers or []):

@@ -11,6 +11,7 @@ The dashboard (single HTML file) is served at /.
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -30,10 +31,20 @@ log = logging.getLogger("main")
 FRONTEND_DIR = Path(__file__).resolve().parent.parent.parent / "frontend"
 
 app = FastAPI(title="Kube Optimizer", version="1.0.0")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"], allow_methods=["*"], allow_headers=["*"],
-)
+
+# The app serves its own dashboard, so normal browser traffic is same-origin and
+# needs no CORS at all. A wildcard `*` would let any website read the API and
+# drive the (unauthenticated) config endpoints cross-origin — a real CSRF/read
+# surface. Cross-origin access is therefore opt-in via CORS_ALLOW_ORIGINS
+# (comma-separated list); by default no cross-origin is allowed.
+_cors_origins = [o.strip() for o in os.getenv("CORS_ALLOW_ORIGINS", "").split(",") if o.strip()]
+if _cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=_cors_origins,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 # --- data sources -----------------------------------------------------------
