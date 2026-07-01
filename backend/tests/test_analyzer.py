@@ -47,6 +47,30 @@ def test_missing_requests_and_limits():
     assert "missing_limits" in kinds
 
 
+def test_half_specified_container_is_flagged():
+    # CPU set but memory absent must still be flagged (per-dimension, not "both missing")
+    spec = ContainerSpec("c", cpu_request=0.5, cpu_limit=1.0)  # memory req/lim absent
+    m = ContainerMetrics(cpu_p95=0.2, cpu_max=0.3, mem_p95=100 * MI, mem_max=150 * MI)
+    finding, _, _ = analyze_container(spec, m, "Burstable")
+    kinds = _kinds(finding)
+    assert "missing_requests" in kinds
+    assert "missing_limits" in kinds
+
+
+def test_besteffort_with_usage_gets_recommendation():
+    # no requests/limits but real usage -> concrete starting point, no phantom reclaim
+    spec = ContainerSpec("c")
+    m = ContainerMetrics(cpu_p95=1.0, cpu_max=2.0, mem_p95=500 * MI, mem_max=800 * MI)
+    finding, reclaim_cpu, reclaim_mem = analyze_container(spec, m, "BestEffort")
+    rec = finding.recommendation
+    assert rec["cpu_request"] is not None and rec["cpu_request"] >= 1.0
+    assert rec["mem_request"] is not None
+    assert rec["cpu_limit"] >= rec["cpu_request"]
+    assert rec["mem_limit"] >= rec["mem_request"]
+    # a new allocation is not a reduction: reclaim totals must not be inflated
+    assert reclaim_cpu == 0 and reclaim_mem == 0
+
+
 def test_idle():
     spec = ContainerSpec("c", cpu_request=0.5, cpu_limit=1.0, mem_request=512 * MI, mem_limit=1 * GI)
     m = ContainerMetrics(cpu_p95=0.001, cpu_max=0.002, mem_p95=10 * MI, mem_max=12 * MI, cpu_throttle=0.0)

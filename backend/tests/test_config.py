@@ -32,6 +32,25 @@ def test_invalid_update_raises_with_field_errors():
     assert set(exc.value.errors) == {"overprov_ratio", "llm_provider", "analysis_window"}
 
 
+def test_zero_length_window_rejected():
+    # "0d" matches the format regex but is an invalid PromQL range
+    with pytest.raises(config.ConfigError) as exc:
+        config.update({"analysis_window": "0d"})
+    assert "analysis_window" in exc.value.errors
+
+
+def test_ollama_host_scheme_validated():
+    with pytest.raises(config.ConfigError) as exc:
+        config.update({"ollama_host": "not-a-url"})
+    assert "ollama_host" in exc.value.errors
+
+
+def test_idle_mem_bytes_editable(tmp_path, monkeypatch):
+    monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
+    config.update({"idle_mem_bytes": 64 * 1024 * 1024})
+    assert config.settings.idle_mem_bytes == 64 * 1024 * 1024
+
+
 def test_secret_set_and_preserved_on_blank(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "CONFIG_PATH", str(tmp_path / "config.json"))
     config.update({"anthropic_api_key": "sk-secret"})

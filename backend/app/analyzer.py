@@ -59,16 +59,23 @@ def analyze_container(c_spec, metrics: ContainerMetrics, qos: str | None) -> Con
     reclaim_mem = 0.0
 
     # ---- Missing requests / limits ----
-    if cpu_req is None and mem_req is None:
+    # Flag per-dimension: a half-specified container (e.g. CPU request set but
+    # memory request absent) is a real problem too, and when the memory *limit*
+    # is missing the OOM-risk branch below can never fire — so we must surface it.
+    missing_req = [dim for dim, val in (("CPU", cpu_req), ("memoria", mem_req)) if val is None]
+    if missing_req:
+        which = " e ".join(missing_req)
         issues.append(Issue(
             "missing_requests", "warning", "Requests assenti",
-            "Nessuna richiesta di CPU/memoria: lo scheduler non può posizionare il pod "
-            "in modo affidabile (QoS BestEffort, primo candidato all'eviction).",
+            f"Richiesta di {which} assente: lo scheduler non può posizionare il pod "
+            "in modo affidabile (QoS peggiore, tra i primi candidati all'eviction).",
         ))
-    if cpu_lim is None and mem_lim is None:
+    missing_lim = [dim for dim, val in (("CPU", cpu_lim), ("memoria", mem_lim)) if val is None]
+    if missing_lim:
+        which = " e ".join(missing_lim)
         issues.append(Issue(
             "missing_limits", "info", "Limits assenti",
-            "Nessun limite impostato: il container può saturare CPU/memoria del nodo.",
+            f"Limite di {which} non impostato: il container può saturare le risorse del nodo.",
         ))
 
     # ---- CPU over-provisioning ----
@@ -82,8 +89,10 @@ def analyze_container(c_spec, metrics: ContainerMetrics, qos: str | None) -> Con
                 f"Usa {format_cpu(cpu_p95)} al p95 contro una richiesta di {format_cpu(cpu_req)} "
                 f"({cpu_ratio*100:.0f}%). Richiesta consigliata: {format_cpu(rec_cpu_req)}.",
             ))
-        if cpu_lim and cpu_max is not None:
-            rec_cpu_lim = max(round_millicores(cpu_max * s.limit_buffer), rec_cpu_req)
+            # only right-size the limit when we actually flagged over-provisioning,
+            # so the drawer never shows a changed limit with no accompanying issue
+            if cpu_lim and cpu_max is not None:
+                rec_cpu_lim = max(round_millicores(cpu_max * s.limit_buffer), rec_cpu_req)
 
     # ---- CPU throttling / under-provisioning ----
     if throttle >= s.throttle_ratio:
@@ -121,13 +130,26 @@ def analyze_container(c_spec, metrics: ContainerMetrics, qos: str | None) -> Con
 
     # ---- Idle ----
     cpu_low = (cpu_p95 is not None and cpu_p95 < s.idle_cpu_cores)
-    mem_low = (mem_p95 is not None and mem_p95 < 32 * 1024 ** 2)  # < 32Mi
+    mem_low = (mem_p95 is not None and mem_p95 < s.idle_mem_bytes)
     if cpu_low and mem_low and (cpu_req or mem_req):
         issues.append(Issue(
             "idle", "info", "Pod inattivo",
             "Consumo di CPU e memoria quasi nullo nella finestra analizzata: "
             "valuta scale-to-zero, riduzione delle repliche o rimozione.",
         ))
+
+    # ---- Fill recommendations from observed usage when the spec is missing ----
+    # A container with no request/limit but real usage still gets a concrete
+    # starting point, so the "assenti" warnings above are actionable. This is a
+    # *new* allocation, not a reduction, so it never contributes to reclaim.
+    if rec_cpu_req is None and cpu_p95 is not None:
+        rec_cpu_req = round_millicores(cpu_p95 * s.request_buffer)
+    if rec_cpu_lim is None and cpu_max is not None:
+        rec_cpu_lim = max(round_millicores(cpu_max * s.limit_buffer), rec_cpu_req or 0.0)
+    if rec_mem_req is None and mem_p95 is not None:
+        rec_mem_req = round_memory_mi(mem_p95 * s.request_buffer)
+    if rec_mem_lim is None and mem_max is not None:
+        rec_mem_lim = max(round_memory_mi(mem_max * s.limit_buffer), rec_mem_req or 0.0)
 
     finding = ContainerFinding(
         name=c_spec.name,
