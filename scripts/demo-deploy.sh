@@ -25,6 +25,23 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 echo "▸ Cluster corrente: $(kubectl config current-context 2>/dev/null || echo '???')"
+
+# Preflight: verifica che il cluster sia DAVVERO raggiungibile prima di
+# buildare/pushare l'immagine. Senza un contesto valido kubectl ripiega sul
+# vecchio default http://localhost:8080 e fallisce al primo `apply` con un
+# criptico "connection refused" a demo già a metà. Meglio fermarsi subito.
+if ! kubectl cluster-info >/dev/null 2>&1; then
+  cat >&2 <<'EOF'
+✗ Cluster Kubernetes non raggiungibile: kubectl non contatta alcun cluster
+  (ripiega su http://localhost:8080).
+  • Docker Desktop: Settings → Kubernetes → "Enable Kubernetes", attendi "Running",
+    poi:  kubectl config use-context docker-desktop
+  • minikube/kind: avvia il cluster e seleziona il contesto corrispondente.
+  Verifica con:  kubectl cluster-info  &&  kubectl get nodes
+EOF
+  exit 1
+fi
+
 case "$(kubectl config current-context 2>/dev/null || true)" in
   docker-desktop|docker-for-desktop) ;;
   *) echo "⚠  Il contesto kubectl non sembra 'docker-desktop'. Continuo comunque tra 3s…"; sleep 3 ;;
